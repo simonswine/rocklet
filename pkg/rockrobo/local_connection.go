@@ -9,11 +9,35 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const MethodHello = "_internal.hello"
+const (
+	MethodHello            = "_internal.hello"
+	MethodRequestDeviceID  = "_internal.request_dinfo"
+	MethodResponseDeviceID = "_internal.response_dinfo"
+	MethodRequestToken     = "_internal.request_dtoken"
+	MethodResponseToken    = "_internal.response_dtoken"
+)
 
-type methodMsg struct {
+type Method struct {
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
+}
+
+type MethodParamsResponseDeviceID struct {
+	DeviceID int    `json:"did"`
+	Key      []byte `json:"key"`
+	Vendor   string `json:"vendor"`
+	MAC      string `json:"mac"`
+	Model    string `json:"model"`
+}
+
+type MethodParamsRequestToken struct {
+	Dir    string `json:"dir"`
+	NToken []byte `json:"ntoken"`
+}
+
+type MethodParamsResponseToken struct {
+	Dir    string `json:"dir"`
+	DToken string `json:"dtoken"`
 }
 
 type localConnection struct {
@@ -58,7 +82,7 @@ func (c *localConnection) handle() {
 		readySent := false
 
 		for {
-			var method methodMsg
+			var method Method
 			err := d.Decode(&method)
 
 			if err == io.EOF {

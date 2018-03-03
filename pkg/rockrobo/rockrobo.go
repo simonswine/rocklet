@@ -1,10 +1,13 @@
 package rockrobo
 
 import (
+	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -21,11 +24,15 @@ type Rockrobo struct {
 	logger zerolog.Logger
 
 	outgoingQueue      chan interface{}
-	incomingQueues     map[string]chan *methodMsg
+	incomingQueues     map[string]chan *Method
 	incomingQueuesLock sync.Mutex
 
-	deviceID    *string
-	deviceToken *string
+	deviceID *MethodParamsResponseDeviceID
+
+	rand   *rand.Rand
+	nToken []byte
+	dToken []byte
+	dir    string
 }
 
 func New() *Rockrobo {
@@ -36,8 +43,17 @@ func New() *Rockrobo {
 			Str("app", "sucklet").
 			Logger().Level(zerolog.DebugLevel),
 
-		incomingQueues: make(map[string]chan *methodMsg),
+		incomingQueues: make(map[string]chan *Method),
 		outgoingQueue:  make(chan interface{}, 0),
+		rand:           rand.New(rand.NewSource(time.Now().UnixNano())),
+		dir:            "/mnt/data/miio/",
+	}
+
+	// generate new token
+	r.nToken = make([]byte, 12)
+	_, err := r.rand.Read(r.nToken)
+	if err != nil {
+		panic(err)
 	}
 
 	return r
@@ -65,24 +81,71 @@ func (r *Rockrobo) Listen() (err error) {
 	return nil
 }
 
-func (r *Rockrobo) GetDeviceID() (*string, error) {
-	dataCh := make(chan *methodMsg)
+func (r *Rockrobo) GetDeviceID() (*MethodParamsResponseDeviceID, error) {
+	// retrieve device ID
+	response, err := r.retrieve(
+		&Method{
+			Method: MethodRequestDeviceID,
+			Params: json.RawMessage(fmt.Sprintf(`"%s"`, r.dir)),
+		},
+		MethodResponseDeviceID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var params MethodParamsResponseDeviceID
+	err = json.Unmarshal(response.Params, &params)
+	if err != nil {
+		return nil, err
+	}
+
+	return &params, nil
+
+}
+
+func (r *Rockrobo) GetToken() (token []byte, err error) {
+	// marshall params
+	reqParams, err := json.Marshal(&MethodParamsRequestToken{
+		Dir:    r.dir,
+		NToken: r.nToken,
+	})
+
+	// retrieve token
+	response, err := r.retrieve(
+		&Method{
+			Method: MethodRequestToken,
+			Params: reqParams,
+		},
+		MethodResponseToken,
+	)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	err = json.Unmarshal(response.Params, &token)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	return token, nil
+}
+
+func (r *Rockrobo) retrieve(requestObj interface{}, methodResponse string) (*Method, error) {
+	dataCh := make(chan *Method)
 
 	// setup, remove channel callback
 	r.incomingQueuesLock.Lock()
-	r.incomingQueues["_internal.response_dinfo"] = dataCh
+	r.incomingQueues[methodResponse] = dataCh
 	r.incomingQueuesLock.Unlock()
 	defer func() {
 		r.incomingQueuesLock.Lock()
-		delete(r.incomingQueues, "_internal.response_dinfo")
+		delete(r.incomingQueues, methodResponse)
 		r.incomingQueuesLock.Unlock()
 	}()
 
 	// write message
-	r.outgoingQueue <- &RequestDeviceID{
-		Method: RequestDeviceIDMethod,
-		Params: "/mnt/data/miio/",
-	}
+	r.outgoingQueue <- requestObj
 
 	// wait for response
 	// TODO add timeout
@@ -90,8 +153,7 @@ func (r *Rockrobo) GetDeviceID() (*string, error) {
 
 	r.Logger().Debug().Interface("resp", resp).Msg("data received")
 
-	return nil, nil
-
+	return resp, nil
 }
 
 func (r *Rockrobo) Run() error {
@@ -119,8 +181,15 @@ func (r *Rockrobo) Run() error {
 	// run udp receiver
 
 	// run status loop
-	r.GetDeviceID()
-	r.GetDeviceID()
+	r.deviceID, err = r.GetDeviceID()
+	if err != nil {
+		return err
+	}
+
+	r.dToken, err = r.GetToken()
+	if err != nil {
+		return err
+	}
 
 	// wait for exist signal
 	<-r.stopCh
