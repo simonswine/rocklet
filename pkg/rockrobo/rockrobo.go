@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/rs/zerolog"
 )
@@ -18,6 +19,13 @@ type Rockrobo struct {
 	stopCh chan struct{}
 
 	logger zerolog.Logger
+
+	outgoingQueue      chan interface{}
+	incomingQueues     map[string]chan *methodMsg
+	incomingQueuesLock sync.Mutex
+
+	deviceID    *string
+	deviceToken *string
 }
 
 func New() *Rockrobo {
@@ -27,6 +35,9 @@ func New() *Rockrobo {
 		logger: zerolog.New(os.Stdout).With().
 			Str("app", "sucklet").
 			Logger().Level(zerolog.DebugLevel),
+
+		incomingQueues: make(map[string]chan *methodMsg),
+		outgoingQueue:  make(chan interface{}, 0),
 	}
 
 	return r
@@ -54,8 +65,33 @@ func (r *Rockrobo) Listen() (err error) {
 	return nil
 }
 
-func (r *Rockrobo) handleLocalConnection(c net.Conn) {
-	r.logger.Debug().Msgf("accepted local connection %s", c.RemoteAddr())
+func (r *Rockrobo) GetDeviceID() (*string, error) {
+	dataCh := make(chan *methodMsg)
+
+	// setup, remove channel callback
+	r.incomingQueuesLock.Lock()
+	r.incomingQueues["_internal.response_dinfo"] = dataCh
+	r.incomingQueuesLock.Unlock()
+	defer func() {
+		r.incomingQueuesLock.Lock()
+		delete(r.incomingQueues, "_internal.response_dinfo")
+		r.incomingQueuesLock.Unlock()
+	}()
+
+	// write message
+	r.outgoingQueue <- &RequestDeviceID{
+		Method: RequestDeviceIDMethod,
+		Params: "/mnt/data/miio/",
+	}
+
+	// wait for response
+	// TODO add timeout
+	resp := <-dataCh
+
+	r.Logger().Debug().Interface("resp", resp).Msg("data received")
+
+	return nil, nil
+
 }
 
 func (r *Rockrobo) Run() error {
@@ -69,17 +105,22 @@ func (r *Rockrobo) Run() error {
 	go func() {
 		for {
 			//accept connections using Listener.Accept()
-			c, err := r.localListener.Accept()
+			conn, err := r.localListener.Accept()
 			if err != nil {
 				r.logger.Warn().Err(err).Msg("accepting local connection failed")
 				continue
 			}
 			//It's common to handle accepted connection on different goroutines
-			go r.handleLocalConnection(c)
+			c := r.newLocalConnection(conn)
+			go c.handle()
 		}
 	}()
 
 	// run udp receiver
+
+	// run status loop
+	r.GetDeviceID()
+	r.GetDeviceID()
 
 	// wait for exist signal
 	<-r.stopCh
