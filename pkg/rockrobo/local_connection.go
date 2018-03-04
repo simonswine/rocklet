@@ -15,11 +15,17 @@ const (
 	MethodResponseDeviceID = "_internal.response_dinfo"
 	MethodRequestToken     = "_internal.request_dtoken"
 	MethodResponseToken    = "_internal.response_dtoken"
+
+	MethodInternalInfo = "_internal.info"
+
+	MethodOTCInfo = "_otc.info"
 )
 
 type Method struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
+	Method    string          `json:"method"`
+	Params    json.RawMessage `json:"params,omitempty"`
+	ID        int             `json:"id,omitempty"`
+	PartnerID string          `json:"partner_id,omitempty"`
 }
 
 type MethodParamsResponseDeviceID struct {
@@ -35,9 +41,28 @@ type MethodParamsRequestToken struct {
 	NToken []byte `json:"ntoken"`
 }
 
-type MethodParamsResponseToken struct {
-	Dir    string `json:"dir"`
-	DToken string `json:"dtoken"`
+type MethodParamsResponseInternalInfo struct {
+	HardwareVersion string `json:"hw_ver"`
+	FirmwareVersion string `json:"fw_ver"`
+	Model           string `json:"model"`
+	MAC             string `json:"mac"`
+	Token           string `json:"token"`
+	Life            int    `json:"life"`
+
+	AccessPoint      MethodParamsResponseInternalInfoAccessPoint      `json:"ap"`
+	NetworkInterface MethodParamsResponseInternalInfoNetworkInterface `json:"netif"`
+}
+
+type MethodParamsResponseInternalInfoAccessPoint struct {
+	SSID  string `json:"ssid"`
+	BSSID string `json:"bssid"`
+	RSSI  int    `json:"rssi"`
+}
+
+type MethodParamsResponseInternalInfoNetworkInterface struct {
+	LocalIP string `json:"localIp"`
+	Mask    string `json:"mask"`
+	Gateway string `json:"gw"`
 }
 
 type localConnection struct {

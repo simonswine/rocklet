@@ -11,7 +11,10 @@ import (
 	"io"
 	"io/ioutil"
 	"reflect"
+	"time"
 )
+
+var CloudMessageHeaderMagic = [2]byte{0x21, 0x31}
 
 type CloudMessageHeader struct {
 	Header   [2]byte
@@ -26,6 +29,22 @@ type CloudMessage struct {
 	CloudMessageHeader
 
 	Body []byte
+}
+
+func NewHelloCloudMessage() *CloudMessage {
+	m := NewCloudMessage()
+	m.DeviceID = 0xffffffff
+	m.Unknown = [4]byte{0xff, 0xff, 0xff, 0xff}
+	return m
+}
+
+func NewCloudMessage() *CloudMessage {
+	return &CloudMessage{
+		CloudMessageHeader: CloudMessageHeader{
+			Epoch:  uint32(time.Now().UTC().Unix()),
+			Header: CloudMessageHeaderMagic,
+		},
+	}
 }
 
 func (m *CloudMessage) Read(reader io.Reader, key []byte) error {
@@ -72,30 +91,34 @@ func (m *CloudMessage) Read(reader io.Reader, key []byte) error {
 	return nil
 }
 
-func (m *CloudMessage) Write(writer io.Writer, key []byte) error {
+func (m *CloudMessage) Write(writer io.Writer, key []byte) (err error) {
 	// copy into temporary message
 	mNew := *m
 
-	// encrypt
-	aesKey, aesIV := aesParamsFromKey(key)
-	aesCipher, err := aes.NewCipher(aesKey)
-	if err != nil {
-		return err
+	// encrypt if there is a body
+	if len(m.Body) > 0 {
+		aesKey, aesIV := aesParamsFromKey(key)
+		aesCipher, err := aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
+
+		// pad plaintext
+		mNew.Body = pad(m.Body)
+
+		mode := cipher.NewCBCEncrypter(aesCipher, aesIV)
+		mode.CryptBlocks(mNew.Body, mNew.Body)
 	}
-
-	// pad plaintext
-	mNew.Body = pad(m.Body)
-
-	mode := cipher.NewCBCEncrypter(aesCipher, aesIV)
-	mode.CryptBlocks(mNew.Body, mNew.Body)
 
 	// set length of package
 	mNew.Length = uint16(binary.Size(&m.CloudMessageHeader) + len(mNew.Body))
 
-	// set checksum
-	mNew.CloudMessageHeader.Checksum, err = mNew.Checksum(key)
-	if err != nil {
-		return err
+	// set checksum if there is a body
+	if len(m.Body) > 0 {
+		mNew.CloudMessageHeader.Checksum, err = mNew.Checksum(key)
+		if err != nil {
+			return err
+		}
 	}
 
 	// write header
@@ -127,6 +150,26 @@ func aesParamsFromKey(key []byte) (awsKey []byte, aesIV []byte) {
 	aesIV = h.Sum(nil)
 
 	return aesKey, aesIV
+}
+
+func (m *CloudMessage) String() string {
+	return fmt.Sprintf("%+v", struct {
+		Timestamp time.Time
+		Body      string
+		DeviceID  uint32
+		Length    uint16
+		Checksum  string
+	}{
+		Timestamp: m.Timestamp(),
+		Body:      string(m.Body),
+		DeviceID:  m.DeviceID,
+		Length:    m.Length,
+		Checksum:  fmt.Sprintf("%x", m.CloudMessageHeader.Checksum),
+	})
+}
+
+func (m *CloudMessage) Timestamp() time.Time {
+	return time.Unix(int64(m.Epoch), 0)
 }
 
 func (m *CloudMessage) Checksum(key []byte) (sum [16]byte, err error) {
