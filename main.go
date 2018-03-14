@@ -1,13 +1,9 @@
 package main
 
 import (
-	"github.com/simonswine/sucklet/pkg/rockrobo"
+	"github.com/simonswine/rocklet/cmd"
 )
 
 func main() {
-	r := rockrobo.New()
-	err := r.Run()
-	if err != nil {
-		r.Logger().Fatal().Err(err).Msg("failed to run")
-	}
+	cmd.Execute()
 }

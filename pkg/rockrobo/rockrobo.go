@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/simonswine/rocklet/pkg/api"
 )
 
 type Rockrobo struct {
@@ -39,7 +40,7 @@ type Rockrobo struct {
 	dir    string
 }
 
-func New() *Rockrobo {
+func New(flags *api.Flags) *Rockrobo {
 	r := &Rockrobo{
 		LocalBindAddr:  "127.0.0.1:54322",
 		GlobalBindAddr: "0.0.0.0:54321",

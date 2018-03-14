@@ -2,14 +2,41 @@
 
 
 [[projects]]
+  name = "github.com/inconshreveable/mousetrap"
+  packages = ["."]
+  revision = "76626ae9c91c4f2a10f34cad8ce83ea42c93bb75"
+  version = "v1.0"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/lmittmann/ppm"
+  packages = ["."]
+  revision = "d7673f8ebc2dd634f8e83fc5c0cb697eb1a2136c"
+
+[[projects]]
   name = "github.com/rs/zerolog"
-  packages = [".","internal/json"]
+  packages = [
+    ".",
+    "internal/json"
+  ]
   revision = "56a970de510213e50dbaa39ad73ac07c9ec75606"
   version = "v1.5.0"
+
+[[projects]]
+  name = "github.com/spf13/cobra"
+  packages = ["."]
+  revision = "7b2c5ac9fc04fc5efafb60700713d4fa609b777b"
+  version = "v0.0.1"
+
+[[projects]]
+  name = "github.com/spf13/pflag"
+  packages = ["."]
+  revision = "e57e3eeb33f795204c1ca35f56c44f83227c6e66"
+  version = "v1.0.0"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "7ae33d6e4b76bf44ffaa8dc0f39c14f84aced1823c42fb432ecf05b4029fa8a7"
+  inputs-digest = "915dde7eaacecb9ac3688a31e3505fb57e593fbf76d1f576cf1165bdd7c44a50"
   solver-name = "gps-cdcl"
   solver-version = 1
