@@ -5,11 +5,15 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"reflect"
 	"time"
 )
@@ -63,6 +67,11 @@ func (m *CloudMessage) Read(reader io.Reader, key []byte) error {
 		return fmt.Errorf("error size of header and actual size mismatch: header=%d actual=%d", exp, act)
 	}
 
+	// if header only don't verify checksums
+	if int(m.Length) == binary.Size(&m.CloudMessageHeader) {
+		return nil
+	}
+
 	// verify checksum is matching
 	checksumExp, err := m.Checksum(key)
 	if err != nil {
@@ -87,6 +96,9 @@ func (m *CloudMessage) Read(reader io.Reader, key []byte) error {
 	if err != nil {
 		return err
 	}
+
+	// remove null termination
+	m.Body = bytes.Trim(m.Body, "\x00")
 
 	return nil
 }
@@ -214,4 +226,80 @@ func unpad(src []byte) ([]byte, error) {
 	}
 
 	return src[:(length - unpadding)], nil
+}
+
+// prepare cloud otc info and send it to cloud
+func (r *Rockrobo) CloudOTCInfo(remoteAddr *net.UDPAddr) (*MethodResultOTCInfo, error) {
+	// get internal info
+	internalInfo, err := r.GetInternalInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	// set token, which is device token in base64 and hex
+	internalInfo.Token = hex.EncodeToString([]byte(base64.StdEncoding.EncodeToString(r.dToken)))
+
+	internalInfo.MAC = r.deviceID.MAC
+	internalInfo.Model = r.deviceID.Model
+	internalInfo.Life = 40707
+
+	// write json params
+	paramsOtcInfo, err := json.Marshal(internalInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	id := r.rand.Int()
+
+	method := &Method{
+		ID:     id,
+		Params: json.RawMessage(paramsOtcInfo),
+		Method: MethodOTCInfo,
+	}
+
+	messageBody, err := json.Marshal(method)
+	if err != nil {
+		return nil, err
+	}
+	messageString := string(messageBody)
+
+	buf := new(bytes.Buffer)
+	message := NewCloudMessage()
+	message.DeviceID = uint32(r.deviceID.DeviceID)
+	message.Body = messageBody
+
+	err = message.Write(buf, []byte(base64.StdEncoding.EncodeToString(r.deviceID.Key)))
+	if err != nil {
+		return nil, err
+	}
+
+	dataCh := make(chan []byte)
+	r.cloudRegisterID(id, dataCh)
+
+	_, err = r.cloudConnection.WriteToUDP(buf.Bytes(), remoteAddr)
+	if err != nil {
+		return nil, err
+	}
+	r.logger.Debug().Str("remote_addr", remoteAddr.String()).Str("message", string(messageString)).Msgf("sent %s message", MethodOTCInfo)
+
+	select {
+	case data := <-dataCh:
+		var method Method
+		if err := json.Unmarshal(data, &method); err != nil {
+			return nil, err
+		}
+
+		var result MethodResultOTCInfo
+		if err := json.Unmarshal(method.Result, &result); err != nil {
+			return nil, err
+		}
+
+		r.logger.Debug().Str("remote_addr", remoteAddr.String()).Interface("result", result).Msg("received otc response")
+
+		return &result, nil
+	case <-time.After(5 * time.Second):
+		break
+	}
+
+	return nil, fmt.Errorf("timeout waiting for otc info")
 }

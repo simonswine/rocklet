@@ -15,15 +15,19 @@ const (
 	MethodResponseDeviceID = "_internal.response_dinfo"
 	MethodRequestToken     = "_internal.request_dtoken"
 	MethodResponseToken    = "_internal.response_dtoken"
-
-	MethodInternalInfo = "_internal.info"
+	MethodInternalInfo     = "_internal.info"
 
 	MethodOTCInfo = "_otc.info"
+
+	MethodLocalStatus                  = "local.status"
+	MethodLocalStatusInternetConnected = "internet_connected"
+	MethodLocalStatusCloudConnected    = "cloud_connected"
 )
 
 type Method struct {
-	Method    string          `json:"method"`
+	Method    string          `json:"method,omitempty"`
 	Params    json.RawMessage `json:"params,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
 	ID        int             `json:"id,omitempty"`
 	PartnerID string          `json:"partner_id,omitempty"`
 }
@@ -63,6 +67,22 @@ type MethodParamsResponseInternalInfoNetworkInterface struct {
 	LocalIP string `json:"localIp"`
 	Mask    string `json:"mask"`
 	Gateway string `json:"gw"`
+}
+
+type IPPort struct {
+	IP   string `json:"ip"`
+	Port int    `json:"port"`
+}
+
+type MethodResultOTCInfo struct {
+	OTCList []IPPort            `json:"otc_list"`
+	OTCTest MethodResultOTCTest `json:"otc_test"`
+}
+
+type MethodResultOTCTest struct {
+	List      []IPPort `json:"list"`
+	FirstTest int      `json:"firsttest"`
+	Interval  int      `json:"interval"`
 }
 
 type localConnection struct {
@@ -173,4 +193,19 @@ func (c *localConnection) handle() {
 
 	wg.Wait()
 
+}
+
+// get the status from local
+func (r *Rockrobo) LocalSetStatus(status string) error {
+	data, err := json.Marshal(&status)
+	if err != nil {
+		return err
+	}
+
+	r.outgoingQueue <- &Method{
+		Method: MethodLocalStatus,
+		Params: json.RawMessage(data),
+	}
+
+	return nil
 }
