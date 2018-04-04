@@ -2,6 +2,7 @@ package rockrobo
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -10,12 +11,14 @@ import (
 )
 
 const (
-	MethodHello            = "_internal.hello"
-	MethodRequestDeviceID  = "_internal.request_dinfo"
-	MethodResponseDeviceID = "_internal.response_dinfo"
-	MethodRequestToken     = "_internal.request_dtoken"
-	MethodResponseToken    = "_internal.response_dtoken"
-	MethodInternalInfo     = "_internal.info"
+	MethodHello                    = "_internal.hello"
+	MethodRequestDeviceID          = "_internal.request_dinfo"
+	MethodResponseDeviceID         = "_internal.response_dinfo"
+	MethodRequestToken             = "_internal.request_dtoken"
+	MethodResponseToken            = "_internal.response_dtoken"
+	MethodInternalInfo             = "_internal.info"
+	MethodRequestWifiConfigStatus  = "_internal.req_wifi_conf_status"
+	MethodResponseWifiConfigStatus = "_internal.res_wifi_conf_status"
 
 	MethodOTCInfo = "_otc.info"
 
@@ -169,7 +172,14 @@ func (c *localConnection) handle() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		<-readyCh
+
+		// wait for ready or connection close
+		select {
+		case <-readyCh:
+		case <-c.closeCh:
+			c.logger.Debug().Msg("break outgoing as connection closed")
+			return
+		}
 
 		e := json.NewEncoder(c.conn)
 
@@ -192,6 +202,54 @@ func (c *localConnection) handle() {
 	}()
 
 	wg.Wait()
+
+}
+
+// discover local device ID
+func (r *Rockrobo) LocalDeviceID() (*MethodParamsResponseDeviceID, error) {
+	// retrieve device ID
+	response, err := r.retrieve(
+		&Method{
+			Method: MethodRequestDeviceID,
+			Params: json.RawMessage(fmt.Sprintf(`"%s"`, r.dir)),
+		},
+		MethodResponseDeviceID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var params MethodParamsResponseDeviceID
+	err = json.Unmarshal(response.Params, &params)
+	if err != nil {
+		return nil, err
+	}
+
+	return &params, nil
+
+}
+
+// get the wifi status from local
+func (r *Rockrobo) LocalWifiConfigStatus() (int, error) {
+	// retrieve device ID
+	response, err := r.retrieve(
+		&Method{
+			Method: MethodRequestWifiConfigStatus,
+			Params: json.RawMessage(fmt.Sprintf(`"%s"`, r.dir)),
+		},
+		MethodResponseWifiConfigStatus,
+	)
+	if err != nil {
+		return -1, err
+	}
+
+	var params int
+	err = json.Unmarshal(response.Params, &params)
+	if err != nil {
+		return -1, err
+	}
+
+	return params, nil
 
 }
 

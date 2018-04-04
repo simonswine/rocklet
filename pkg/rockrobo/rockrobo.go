@@ -97,29 +97,6 @@ func (r *Rockrobo) Listen() (err error) {
 	return nil
 }
 
-func (r *Rockrobo) GetDeviceID() (*MethodParamsResponseDeviceID, error) {
-	// retrieve device ID
-	response, err := r.retrieve(
-		&Method{
-			Method: MethodRequestDeviceID,
-			Params: json.RawMessage(fmt.Sprintf(`"%s"`, r.dir)),
-		},
-		MethodResponseDeviceID,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var params MethodParamsResponseDeviceID
-	err = json.Unmarshal(response.Params, &params)
-	if err != nil {
-		return nil, err
-	}
-
-	return &params, nil
-
-}
-
 func (r *Rockrobo) GetInternalInfo() (*MethodParamsResponseInternalInfo, error) {
 	// retrieve device ID
 	response, err := r.retrieve(
@@ -216,7 +193,7 @@ func (r *Rockrobo) Run() error {
 	}()
 
 	// get device ID
-	r.deviceID, err = r.GetDeviceID()
+	r.deviceID, err = r.LocalDeviceID()
 	if err != nil {
 		return err
 	}
@@ -227,7 +204,12 @@ func (r *Rockrobo) Run() error {
 		return err
 	}
 
-	// TODO: init wifi
+	// get wifi config status
+	wifiConfigState, err := r.LocalWifiConfigStatus()
+	if err != nil {
+		return err
+	}
+	r.logger.Debug().Err(err).Int("wifi_config_state", wifiConfigState).Msg("retrieved wifi config state")
 
 	// start udp receiver
 	keepAliveCh := make(chan net.Addr, 16)
@@ -384,13 +366,12 @@ func (r *Rockrobo) Run() error {
 					r.LocalSetStatus(MethodLocalStatusCloudConnected)
 
 				}
+
+				failedAttemps = 0
+
+				// TODO wait for response
+				time.Sleep(15 * time.Second)
 			}
-
-			failedAttemps = 0
-
-			// TODO wait for response
-			time.Sleep(15 * time.Second)
-
 		}
 
 	}()
