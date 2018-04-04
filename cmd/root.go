@@ -35,4 +35,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&flags.Verbose, "verbose", "v", false, "Enable verbose logging")
 	rootCmd.PersistentFlags().StringVarP(&flags.DataDirectory, "data-directory", "d", "/mnt/data/miio", "MIIO data directory")
 	rootCmd.PersistentFlags().StringVarP(&flags.RuntimeDirectory, "runtime-directory", "r", "/run/shm", "Runtime directory")
+	rootCmd.PersistentFlags().StringVar(&flags.Kubeconfig, "kubeconfig", "~/.kube/config", "Path to kubeconfig")
+	rootCmd.PersistentFlags().IntVar(&flags.KubeAPIPort, "kube-api-port", 10250, "Port for kube API to listen on")
 }
