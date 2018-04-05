@@ -57,6 +57,102 @@ func (k *Kubernetes) registerWithAPIServer() {
 		}
 	}
 }
+func (k *Kubernetes) fakeRemoteControlPodName() string {
+	return fmt.Sprintf("remote-control-%s", k.nodeName)
+}
+
+func (k *Kubernetes) fakeRemoteControlPod() *v1.Pod {
+	now := metav1.NewTime(time.Now())
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              k.fakeRemoteControlPodName(),
+			CreationTimestamp: now,
+			Annotations: map[string]string{
+				v1.MirrorPodAnnotationKey: "fake",
+			},
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{{
+				Name:  "container",
+				Image: "fake/image:1.0",
+			}},
+			NodeName: k.nodeName,
+			Tolerations: []v1.Toleration{{
+				Effect:   v1.TaintEffectNoSchedule,
+				Operator: v1.TolerationOpExists,
+			}},
+		},
+	}
+}
+
+func (k *Kubernetes) setfakePodStatus(p *v1.Pod) {
+	now := metav1.NewTime(time.Now())
+	p.Name = k.fakeRemoteControlPodName()
+	p.Status.StartTime = &now
+	p.Status.Conditions = []v1.PodCondition{
+		{
+			LastTransitionTime: now,
+			Status:             v1.ConditionTrue,
+			Type:               v1.PodConditionType("PodScheduled"),
+		},
+		{
+			LastTransitionTime: now,
+			Status:             v1.ConditionTrue,
+			Type:               v1.PodConditionType("Initialized"),
+		},
+		{
+			Type:               v1.PodConditionType("Ready"),
+			Status:             v1.ConditionTrue,
+			LastTransitionTime: now,
+		},
+	}
+	p.Status.ContainerStatuses = []v1.ContainerStatus{{
+		Name:         "container",
+		Ready:        true,
+		ImageID:      "docker://deadcafe",
+		ContainerID:  "docker://deadcafe",
+		RestartCount: 0,
+		State: v1.ContainerState{
+			Running: &v1.ContainerStateRunning{
+				StartedAt: now,
+			},
+		},
+	}}
+	p.Status.Phase = "Running"
+	p.Status.HostIP = "1.1.1.1"
+	p.Status.PodIP = "1.1.1.1"
+}
+
+// this ensure the fake pods are there
+func (k *Kubernetes) ensureFakePods() error {
+	cl := k.kubeClient.CoreV1().Pods(metav1.NamespaceDefault)
+	name := k.fakeRemoteControlPodName()
+
+	// remove any existing pod at first run
+	if !k.fakePodsCompleted {
+		var zero int64
+		cl.Delete(name, &metav1.DeleteOptions{GracePeriodSeconds: &zero})
+	}
+
+	// try to get existing or get pod
+	pod, err := cl.Get(name, metav1.GetOptions{})
+	if err != nil {
+		// other err than not existing
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		pod, err = cl.Create(k.fakeRemoteControlPod())
+		if err != nil {
+			return err
+		}
+	}
+	k.fakePodsCompleted = true
+
+	k.setfakePodStatus(pod)
+	_, err = cl.UpdateStatus(pod)
+	return err
+
+}
 
 // tryRegisterWithAPIServer makes an attempt to register the given node with
 // the API server, returning a boolean indicating whether the attempt was
@@ -143,6 +239,9 @@ func (k *Kubernetes) syncNodeStatus() {
 		return
 	}
 	k.registerWithAPIServer()
+	if err := k.ensureFakePods(); err != nil {
+		k.logger.Error().Msgf("Unable to update fake pod status: %v", err)
+	}
 	if err := k.updateNodeStatus(); err != nil {
 		k.logger.Error().Msgf("Unable to update node status: %v", err)
 	}
@@ -169,17 +268,12 @@ func (k *Kubernetes) tryUpdateNodeStatus(tryNumber int) error {
 		return fmt.Errorf("error getting node %q: %v", k.nodeName, err)
 	}
 
-	originalNode := node.DeepCopy()
-	if originalNode == nil {
-		return fmt.Errorf("nil %q node object", k.nodeName)
-	}
-
+	k.setNodeStatus(node)
 	_, err = k.kubeClient.CoreV1().Nodes().UpdateStatus(node)
 	if err != nil {
 		return err
 	}
 
-	// TODO: update me
 	return nil
 }
 
@@ -230,6 +324,11 @@ func (k *Kubernetes) setNodeStatus(node *v1.Node) {
 	k.setNodeStatusVersionInfo(node)
 	k.setNodeAdress(node)
 	k.setNodeReadyCondition(node)
+	k.setNodeKubeletPort(node)
+}
+
+func (k *Kubernetes) setNodeKubeletPort(node *v1.Node) {
+	node.Status.DaemonEndpoints.KubeletEndpoint.Port = int32(k.flags.Kubernetes.KubeletPort)
 }
 
 func (k *Kubernetes) setNodeAdress(node *v1.Node) {

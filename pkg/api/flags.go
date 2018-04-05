@@ -6,5 +6,14 @@ type Flags struct {
 	RuntimeDirectory string
 	Kubeconfig       string
 
-	KubeAPIPort int
+	Kubernetes struct {
+		KubeletPort int
+
+		CertPath   string
+		KeyPath    string
+		CACertPath string
+		CAKeyPath  string
+
+		NodeName string
+	}
 }

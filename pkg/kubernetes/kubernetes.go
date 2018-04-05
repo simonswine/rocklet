@@ -33,6 +33,8 @@ type Kubernetes struct {
 
 	// for internal book keeping; access only from within registerWithApiserver
 	registrationCompleted bool
+
+	fakePodsCompleted bool
 }
 
 func (k *Kubernetes) Logger() *zerolog.Logger {
@@ -41,6 +43,8 @@ func (k *Kubernetes) Logger() *zerolog.Logger {
 
 func (k *Kubernetes) Run() error {
 	var err error
+
+	go k.runServer()
 
 	if k.hostName == "" {
 		k.hostName, err = os.Hostname()
@@ -76,6 +80,7 @@ func (k *Kubernetes) Run() error {
 	})
 
 	for {
+		k.logger.Debug().Msg("sync node status")
 		k.syncNodeStatus()
 		time.Sleep(15 * time.Second)
 	}
@@ -86,7 +91,7 @@ func (k *Kubernetes) Run() error {
 
 func New(flags *api.Flags) *Kubernetes {
 	k := &Kubernetes{
-		nodeName: "rockrobo",
+		nodeName: flags.Kubernetes.NodeName,
 		logger: zerolog.New(os.Stdout).With().
 			Str("app", "kubernetes").
 			Logger().Level(zerolog.DebugLevel),
