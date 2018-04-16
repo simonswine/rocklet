@@ -23,6 +23,12 @@
   version = "v1.0.0"
 
 [[projects]]
+  name = "github.com/gizak/termui"
+  packages = ["."]
+  revision = "24acd523c756fd9728824cdfac66aad9d8982fb7"
+  version = "v2.2.0"
+
+[[projects]]
   name = "github.com/gogo/protobuf"
   packages = [
     "proto",
@@ -108,6 +114,24 @@
   revision = "d7673f8ebc2dd634f8e83fc5c0cb697eb1a2136c"
 
 [[projects]]
+  name = "github.com/maruel/panicparse"
+  packages = ["stack"]
+  revision = "785840568bdc7faa0dfb1cd6c643207f03271f64"
+  version = "v1.1.1"
+
+[[projects]]
+  name = "github.com/mattn/go-runewidth"
+  packages = ["."]
+  revision = "9e777a8366cce605130a531d2cd6363d07ad7317"
+  version = "v0.0.2"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mitchellh/go-wordwrap"
+  packages = ["."]
+  revision = "ad45545899c7b13c020ea92b2072220eefad42b8"
+
+[[projects]]
   name = "github.com/modern-go/concurrent"
   packages = ["."]
   revision = "bacd9c7ef1dd9b15be4a9909b8ac7a4e313eec94"
@@ -118,6 +142,12 @@
   packages = ["."]
   revision = "1df9eeb2bb81f327b96228865c5687bc2194af3f"
   version = "1.0.0"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/nsf/termbox-go"
+  packages = ["."]
+  revision = "e2050e41c8847748ec5288741c0b19a8cb26d084"
 
 [[projects]]
   name = "github.com/rs/zerolog"
@@ -386,6 +416,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "fff278d70af706f502cdad96867b70ec6fe80a55508ab226254a3b553fcf78af"
+  inputs-digest = "e46a39429dbda2a26cf6d7f429d0b60db790425007c09aed3277c0b9804b0a72"
   solver-name = "gps-cdcl"
   solver-version = 1
