@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -25,6 +26,10 @@ const (
 	MethodLocalStatus                  = "local.status"
 	MethodLocalStatusInternetConnected = "internet_connected"
 	MethodLocalStatusCloudConnected    = "cloud_connected"
+
+	MethodLocalAppRCStart = "app_rc_start"
+	MethodLocalAppRCEnd   = "app_rc_end"
+	MethodLocalAppRCMove  = "app_rc_move"
 )
 
 type Method struct {
@@ -46,6 +51,13 @@ type MethodParamsResponseDeviceID struct {
 type MethodParamsRequestToken struct {
 	Dir    string `json:"dir"`
 	NToken []byte `json:"ntoken"`
+}
+
+type MethodParamsRequestAppRC struct {
+	Velocity       *float64 `json:"velocity,omitempty"`
+	Omega          *float64 `json:"omega,omitempty"`
+	Duration       *int     `json:"duration,omitempty"`
+	SequenceNumber int      `json:"seqnum,omitempty"`
 }
 
 type MethodParamsResponseInternalInfo struct {
@@ -173,9 +185,15 @@ func (c *localConnection) handle() {
 	go func() {
 		defer wg.Done()
 
+		var sendChannel *chan *Method
+
 		// wait for ready or connection close
 		select {
 		case <-readyCh:
+			sendChannel = &c.rockrobo.outgoingQueue
+		case <-time.After(1 * time.Second):
+			sendChannel = &c.rockrobo.outgoingQueueApp
+			c.logger.Debug().Msg("looks like I am connected to a AppProxy")
 		case <-c.closeCh:
 			c.logger.Debug().Msg("break outgoing as connection closed")
 			return
@@ -186,7 +204,7 @@ func (c *localConnection) handle() {
 		c.logger.Debug().Msg("local connection ready")
 		for {
 			select {
-			case obj := <-c.rockrobo.outgoingQueue:
+			case obj := <-*sendChannel:
 				err := e.Encode(obj)
 				if err != nil {
 					c.logger.Warn().Err(err).Interface("data", obj).Msg("error sending data")
@@ -263,6 +281,63 @@ func (r *Rockrobo) LocalSetStatus(status string) error {
 	r.outgoingQueue <- &Method{
 		Method: MethodLocalStatus,
 		Params: json.RawMessage(data),
+	}
+
+	return nil
+}
+
+// start remote control mode
+func (r *Rockrobo) LocalAppRCStart() error {
+	r.appRCSequenceNumber = 1
+	r.outgoingQueueApp <- &Method{
+		Method: MethodLocalAppRCStart,
+		ID:     r.rand.Int(),
+	}
+	return nil
+}
+
+// end remote control mode
+func (r *Rockrobo) LocalAppRCEnd() error {
+	params := []MethodParamsRequestAppRC{
+		{
+			SequenceNumber: r.appRCSequenceNumber,
+		},
+	}
+	paramsData, err := json.Marshal(&params)
+	if err != nil {
+		return err
+	}
+	r.appRCSequenceNumber++
+
+	r.outgoingQueueApp <- &Method{
+		Method: MethodLocalAppRCEnd,
+		ID:     r.rand.Int(),
+		Params: json.RawMessage(paramsData),
+	}
+
+	return nil
+}
+
+// do a remote control move
+func (r *Rockrobo) LocalAppRCMove(velocity, omega float64, duration int) error {
+	params := []MethodParamsRequestAppRC{
+		{
+			SequenceNumber: r.appRCSequenceNumber,
+			Duration:       &duration,
+			Omega:          &omega,
+			Velocity:       &velocity,
+		},
+	}
+	paramsData, err := json.Marshal(&params)
+	if err != nil {
+		return err
+	}
+	r.appRCSequenceNumber++
+
+	r.outgoingQueueApp <- &Method{
+		Method: MethodLocalAppRCMove,
+		ID:     r.rand.Int(),
+		Params: json.RawMessage(paramsData),
 	}
 
 	return nil

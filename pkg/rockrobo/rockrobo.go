@@ -31,12 +31,15 @@ type Rockrobo struct {
 
 	logger zerolog.Logger
 
-	outgoingQueue      chan interface{}
+	outgoingQueueApp   chan *Method
+	outgoingQueue      chan *Method
 	incomingQueues     map[string]chan *Method
 	incomingQueuesLock sync.Mutex
 
 	deviceID     *MethodParamsResponseDeviceID
 	internalInfo *MethodParamsResponseInternalInfo
+
+	appRCSequenceNumber int
 
 	rand   *rand.Rand
 	nToken []byte
@@ -54,10 +57,11 @@ func New(flags *api.Flags) *Rockrobo {
 			Str("app", "rocklet").
 			Logger().Level(zerolog.DebugLevel),
 
-		incomingQueues: make(map[string]chan *Method),
-		outgoingQueue:  make(chan interface{}, 0),
-		rand:           rand.New(rand.NewSource(time.Now().UnixNano())),
-		dir:            "/mnt/data/miio/",
+		incomingQueues:   make(map[string]chan *Method),
+		outgoingQueue:    make(chan *Method, 0),
+		outgoingQueueApp: make(chan *Method, 0),
+		rand:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		dir:              "/mnt/data/miio/",
 	}
 
 	// generate new token
@@ -145,7 +149,7 @@ func (r *Rockrobo) GetToken() (token []byte, err error) {
 	return token, nil
 }
 
-func (r *Rockrobo) retrieve(requestObj interface{}, methodResponse string) (*Method, error) {
+func (r *Rockrobo) retrieve(requestObj *Method, methodResponse string) (*Method, error) {
 	dataCh := make(chan *Method)
 
 	// setup, remove channel callback
@@ -373,8 +377,44 @@ func (r *Rockrobo) Run() error {
 				time.Sleep(15 * time.Second)
 			}
 		}
-
 	}()
+
+	time.Sleep(5 * time.Second)
+
+	// start rc
+	if err := r.LocalAppRCStart(); err != nil {
+		return err
+	}
+
+	time.Sleep(10 * time.Second)
+
+	// move straight
+	if err := r.LocalAppRCMove(0.2, 0.0, 1500); err != nil {
+		return err
+	}
+	time.Sleep(5 * time.Second)
+
+	// turn
+	if err := r.LocalAppRCMove(0.0, -1.047200, 1500); err != nil {
+		return err
+	}
+	time.Sleep(1 * time.Second)
+
+	// move straight
+	if err := r.LocalAppRCMove(0.2, 0.0, 1500); err != nil {
+		return err
+	}
+	time.Sleep(1 * time.Second)
+
+	// move back
+	if err := r.LocalAppRCMove(-0.2, 0.0, 1500); err != nil {
+		return err
+	}
+
+	// stop rc
+	if err := r.LocalAppRCEnd(); err != nil {
+		return err
+	}
 
 	// wait for exist signal
 	<-r.stopCh
