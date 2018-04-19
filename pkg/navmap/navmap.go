@@ -107,11 +107,15 @@ func (n *NavMap) Logger() *zerolog.Logger {
 	return &n.logger
 }
 
+func (n *NavMap) SetupHandler(serveMux *http.ServeMux) {
+	serveMux.HandleFunc("/navmap/jpeg", n.handleJPEG)
+	serveMux.HandleFunc("/navmap/png", n.handlePNG)
+}
+
 func (n *NavMap) loopHTTPServer() {
 	defer n.wg.Done()
 	serveMux := http.NewServeMux()
-	serveMux.HandleFunc("/jpeg", n.handleJPEG)
-	serveMux.HandleFunc("/png", n.handlePNG)
+	n.SetupHandler(serveMux)
 
 	s := &http.Server{
 		Addr:    ":1888",

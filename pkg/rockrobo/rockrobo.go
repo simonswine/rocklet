@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/simonswine/rocklet/pkg/api"
+	"github.com/simonswine/rocklet/pkg/metrics"
+	"github.com/simonswine/rocklet/pkg/navmap"
 )
 
 const CloudDNSName = "ot.io.mi.com"
@@ -27,7 +30,11 @@ type Rockrobo struct {
 	LocalBindAddr string
 	localListener net.Listener
 
-	stopCh chan struct{}
+	HTTPBindAddr string
+	httpListener net.Listener
+
+	stopCh    chan struct{}
+	waitGroup sync.WaitGroup
 
 	logger zerolog.Logger
 
@@ -48,12 +55,19 @@ type Rockrobo struct {
 	nToken []byte
 	dToken []byte
 	dir    string
+
+	// metrics module
+	metrics *metrics.Metrics
+
+	// navmap module
+	navMap *navmap.NavMap
 }
 
 func New(flags *api.Flags) *Rockrobo {
 	r := &Rockrobo{
 		LocalBindAddr:  "127.0.0.1:54322",
 		CloudBindAddr:  "0.0.0.0:54321",
+		HTTPBindAddr:   "0.0.0.0:54320",
 		cloudEndpoints: make(map[string]struct{}),
 		cloudSessions:  make(map[int]chan []byte),
 		logger: zerolog.New(os.Stdout).With().
@@ -66,6 +80,12 @@ func New(flags *api.Flags) *Rockrobo {
 		rand: rand.New(rand.NewSource(time.Now().UnixNano())),
 		dir:  "/mnt/data/miio/",
 	}
+
+	// initialize metrics
+	r.metrics = metrics.New(r.logger)
+
+	// initialize navmap
+	r.navMap = navmap.New(flags)
 
 	// generate new token
 	r.nToken = make([]byte, 12)
@@ -93,6 +113,13 @@ func (r *Rockrobo) Listen() (err error) {
 		return fmt.Errorf("error binding cloud socket: %s", err)
 	}
 	r.Logger().Debug().Msgf("successfully bound cloud server to %s", r.CloudBindAddr)
+	// handle closing
+	go func() {
+		<-r.stopCh
+		if err := r.cloudConnection.Close(); err != nil {
+			r.logger.Warn().Err(err).Msg("error closing cloud connection")
+		}
+	}()
 
 	// listen for local connections
 	r.localListener, err = net.Listen("tcp", r.LocalBindAddr)
@@ -100,6 +127,27 @@ func (r *Rockrobo) Listen() (err error) {
 		return fmt.Errorf("error binding local socket: %s", err)
 	}
 	r.Logger().Debug().Msgf("successfully bound local server to %s", r.LocalBindAddr)
+	// handle closing
+	go func() {
+		<-r.stopCh
+		if err := r.localListener.Close(); err != nil {
+			r.logger.Warn().Err(err).Msg("error closing local listener")
+		}
+	}()
+
+	// listen for http connections
+	r.httpListener, err = net.Listen("tcp", r.HTTPBindAddr)
+	if err != nil {
+		return fmt.Errorf("error binding http socket: %s", err)
+	}
+	r.Logger().Debug().Msgf("successfully bound http server to %s", r.HTTPBindAddr)
+	// handle closing
+	go func() {
+		<-r.stopCh
+		if err := r.httpListener.Close(); err != nil {
+			r.logger.Warn().Err(err).Msg("error closing http listener")
+		}
+	}()
 
 	return nil
 }
@@ -184,8 +232,31 @@ func (r *Rockrobo) Run() error {
 		return err
 	}
 
-	// run tcp connection handler
+	// run http server for metrics/navmaps
+	r.waitGroup.Add(1)
 	go func() {
+		defer r.waitGroup.Done()
+
+		// create mux
+		serveMux := http.NewServeMux()
+
+		// setup navmaps
+		r.navMap.SetupHandler(serveMux)
+
+		// setup metrics
+		serveMux.Handle("/metrics", r.metrics.Handler())
+		r.metrics.BatteryLevel.WithLabelValues("test").Set(91.11)
+
+		// serve http
+		if err := http.Serve(r.httpListener, serveMux); err != nil {
+			r.logger.Warn().Err(err).Msg("error serving http server")
+		}
+	}()
+
+	// run tcp connection handler
+	r.waitGroup.Add(1)
+	go func() {
+		defer r.waitGroup.Done()
 		for {
 			//accept connections using Listener.Accept()
 			conn, err := r.localListener.Accept()
