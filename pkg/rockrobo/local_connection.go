@@ -353,3 +353,57 @@ func (r *Rockrobo) LocalAppRCMove(velocity, omega float64, duration int) error {
 
 	return nil
 }
+
+// local connection handler
+func (r *Rockrobo) runLocalConnectionHandler() {
+	defer r.waitGroup.Done()
+	for {
+		//accept connections using Listener.Accept()
+		conn, err := r.localListener.Accept()
+		if err != nil {
+			if x, ok := err.(*net.OpError); ok && x.Op == "accept" { // We're done
+				break
+			}
+			r.logger.Warn().Err(err).Msg("accepting local connection failed")
+			continue
+		}
+		//It's common to handle accepted connection on different goroutines
+		c := r.newLocalConnection(conn)
+		go c.handle()
+	}
+	r.logger.Debug().Msg("stopping local connection handler")
+}
+
+// init local device
+func (r *Rockrobo) runLocalDeviceInit() {
+	var err error
+
+	for {
+		r.logger.Info().Msg("waiting for device to connect")
+		// get device ID
+		r.deviceID, err = r.LocalDeviceID()
+		if err != nil {
+			r.logger.Error().Err(err).Msg("failed to get local device ID")
+			continue
+		}
+
+		// get device token
+		r.dToken, err = r.GetToken()
+		if err != nil {
+			r.logger.Error().Err(err).Msg("failed to get local device token")
+			continue
+		}
+
+		// get wifi config status
+		wifiConfigState, err := r.LocalWifiConfigStatus()
+		if err != nil {
+			r.logger.Error().Err(err).Msg("failed to get local wifi config status")
+			continue
+		}
+		r.logger.Debug().Err(err).Int("wifi_config_state", wifiConfigState).Msg("retrieved wifi config state")
+
+		r.logger.Info().Int("device_id", r.deviceID.DeviceID).Msg("device ready")
+		close(r.localDeviceReadyCh)
+		break
+	}
+}

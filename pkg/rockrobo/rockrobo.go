@@ -1,15 +1,15 @@
 package rockrobo
 
 import (
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -26,6 +26,7 @@ type Rockrobo struct {
 	cloudEndpoints    map[string]struct{} // this is a maintained map of accessbile cloud endpoints
 	cloudSessions     map[int]chan []byte
 	cloudSessionsLock sync.Mutex
+	cloudKeepAliveCh  chan net.Addr
 
 	LocalBindAddr string
 	localListener net.Listener
@@ -33,8 +34,12 @@ type Rockrobo struct {
 	HTTPBindAddr string
 	httpListener net.Listener
 
+	// stop the run of rockrobo
 	stopCh    chan struct{}
 	waitGroup sync.WaitGroup
+
+	// localDeviceReady
+	localDeviceReadyCh chan struct{}
 
 	logger zerolog.Logger
 
@@ -65,11 +70,14 @@ type Rockrobo struct {
 
 func New(flags *api.Flags) *Rockrobo {
 	r := &Rockrobo{
-		LocalBindAddr:  "127.0.0.1:54322",
-		CloudBindAddr:  "0.0.0.0:54321",
-		HTTPBindAddr:   "0.0.0.0:54320",
-		cloudEndpoints: make(map[string]struct{}),
-		cloudSessions:  make(map[int]chan []byte),
+		LocalBindAddr:      "127.0.0.1:54322",
+		localDeviceReadyCh: make(chan struct{}),
+		CloudBindAddr:      "0.0.0.0:54321",
+		HTTPBindAddr:       "0.0.0.0:54320",
+		cloudEndpoints:     make(map[string]struct{}),
+		cloudSessions:      make(map[int]chan []byte),
+		cloudKeepAliveCh:   make(chan net.Addr, 16),
+		stopCh:             make(chan struct{}),
 		logger: zerolog.New(os.Stdout).With().
 			Str("app", "rocklet").
 			Logger().Level(zerolog.DebugLevel),
@@ -119,6 +127,7 @@ func (r *Rockrobo) Listen() (err error) {
 		if err := r.cloudConnection.Close(); err != nil {
 			r.logger.Warn().Err(err).Msg("error closing cloud connection")
 		}
+		r.Logger().Debug().Msgf("closed cloud server at %s", r.CloudBindAddr)
 	}()
 
 	// listen for local connections
@@ -133,6 +142,7 @@ func (r *Rockrobo) Listen() (err error) {
 		if err := r.localListener.Close(); err != nil {
 			r.logger.Warn().Err(err).Msg("error closing local listener")
 		}
+		r.Logger().Debug().Msgf("closed local server at %s", r.LocalBindAddr)
 	}()
 
 	// listen for http connections
@@ -147,6 +157,7 @@ func (r *Rockrobo) Listen() (err error) {
 		if err := r.httpListener.Close(); err != nil {
 			r.logger.Warn().Err(err).Msg("error closing http listener")
 		}
+		r.Logger().Debug().Msgf("closed http server at %s", r.LocalBindAddr)
 	}()
 
 	return nil
@@ -225,7 +236,48 @@ func (r *Rockrobo) retrieve(requestObj *Method, methodResponse string) (*Method,
 	return resp, nil
 }
 
+// handle sigterm sigint
+func (r *Rockrobo) runSignalHandling(sigs chan os.Signal) {
+	for sig := range sigs {
+		if r.stopCh != nil {
+			close(r.stopCh)
+			r.stopCh = nil
+		}
+		r.Logger().Info().Msgf("received signal: %s", sig.String())
+	}
+}
+
+// http server for navigation maps and metrics
+func (r *Rockrobo) runHTTPServer() {
+	defer r.waitGroup.Done()
+
+	// create mux
+	serveMux := http.NewServeMux()
+
+	// setup navmaps
+	r.navMap.SetupHandler(serveMux)
+
+	// setup metrics
+	serveMux.Handle("/metrics", r.metrics.Handler())
+	r.metrics.BatteryLevel.WithLabelValues("test").Set(91.11)
+
+	// serve http
+	if err := http.Serve(r.httpListener, serveMux); err != nil {
+		if x, ok := err.(*net.OpError); ok && x.Err.Error() == "use of closed network connection" {
+			return
+		}
+		r.logger.Warn().Err(err).Msg("error serving http server")
+	}
+
+	r.logger.Debug().Msg("stopping http server")
+}
+
 func (r *Rockrobo) Run() error {
+	// setup signal handling
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go r.runSignalHandling(sigs)
+
 	// bind sockets
 	err := r.Listen()
 	if err != nil {
@@ -234,266 +286,21 @@ func (r *Rockrobo) Run() error {
 
 	// run http server for metrics/navmaps
 	r.waitGroup.Add(1)
-	go func() {
-		defer r.waitGroup.Done()
+	go r.runHTTPServer()
 
-		// create mux
-		serveMux := http.NewServeMux()
-
-		// setup navmaps
-		r.navMap.SetupHandler(serveMux)
-
-		// setup metrics
-		serveMux.Handle("/metrics", r.metrics.Handler())
-		r.metrics.BatteryLevel.WithLabelValues("test").Set(91.11)
-
-		// serve http
-		if err := http.Serve(r.httpListener, serveMux); err != nil {
-			r.logger.Warn().Err(err).Msg("error serving http server")
-		}
-	}()
-
-	// run tcp connection handler
+	// run local tcp connection handler
 	r.waitGroup.Add(1)
-	go func() {
-		defer r.waitGroup.Done()
-		for {
-			//accept connections using Listener.Accept()
-			conn, err := r.localListener.Accept()
-			if err != nil {
-				r.logger.Warn().Err(err).Msg("accepting local connection failed")
-				continue
-			}
-			//It's common to handle accepted connection on different goroutines
-			c := r.newLocalConnection(conn)
-			go c.handle()
-		}
-	}()
+	go r.runLocalConnectionHandler()
 
-	// get device ID
-	r.deviceID, err = r.LocalDeviceID()
-	if err != nil {
-		return err
-	}
-
-	// get device token
-	r.dToken, err = r.GetToken()
-	if err != nil {
-		return err
-	}
-
-	// get wifi config status
-	wifiConfigState, err := r.LocalWifiConfigStatus()
-	if err != nil {
-		return err
-	}
-	r.logger.Debug().Err(err).Int("wifi_config_state", wifiConfigState).Msg("retrieved wifi config state")
+	// run local device init
+	go r.runLocalDeviceInit()
 
 	// start udp receiver
-	keepAliveCh := make(chan net.Addr, 16)
-	go func() {
-		for {
-			packet := make([]byte, 4096)
-			length, raddr, err := r.cloudConnection.ReadFrom(packet)
-			if err != nil {
-				r.logger.Warn().Err(err).Msg("failed cloud connection read")
-				continue
-			}
-
-			reader := bytes.NewReader(packet[0:length])
-
-			var msg CloudMessage
-
-			err = msg.Read(reader, []byte(base64.StdEncoding.EncodeToString(r.deviceID.Key)))
-			if err != nil {
-				r.logger.Warn().Str("remote_addr", raddr.String()).Err(err).Msg("failed to decode cloud message")
-			}
-
-			if msg.Length == uint16(32) {
-				keepAliveCh <- raddr
-				continue
-			}
-
-			// parse payload
-			var method Method
-			if err := json.Unmarshal(msg.Body, &method); err != nil {
-				r.logger.Warn().Str("remote_addr", raddr.String()).Str("payload", string(msg.Body)).Err(err).Msg("unable to parse payload")
-			}
-
-			r.cloudSessionsLock.Lock()
-			ch, ok := r.cloudSessions[method.ID]
-			if ok {
-				delete(r.cloudSessions, method.ID)
-			}
-			r.cloudSessionsLock.Unlock()
-
-			if ok {
-				ch <- msg.Body
-			} else {
-				r.logger.Warn().Str("remote_addr", raddr.String()).Interface("method", method).Msg("unhandled message from cloud")
-			}
-
-		}
-	}()
+	r.waitGroup.Add(1)
+	go r.runCloudReceiver()
 
 	// keep alive cloud connection
-	go func() {
-	ConnectionLoop:
-		for {
-
-			// remove existing cloud forwarder
-			r.incomingQueuesLock.Lock()
-			delete(r.incomingQueues, "cloud")
-			r.incomingQueuesLock.Unlock()
-			var incomingQueueCloudCh *chan *Method
-
-			// look up cloud endpoints if none are available
-			if len(r.cloudEndpoints) == 0 {
-				hosts, err := net.LookupHost(CloudDNSName)
-				if err != nil {
-					r.logger.Warn().Err(err).Msgf("failed to resolve '%s'", CloudDNSName)
-					continue
-				}
-				for _, host := range hosts {
-					r.cloudEndpoints[host] = struct{}{}
-				}
-			}
-
-			// skip if no cloud endpoint available
-			if len(r.cloudEndpoints) == 0 {
-				r.logger.Warn().Err(err).Msg("no cloud endpoints available")
-				continue
-			}
-
-			// select an endpoint randomly
-			i := r.rand.Intn(len(r.cloudEndpoints))
-			var host string
-			for host = range r.cloudEndpoints {
-				if i == 0 {
-					break
-				}
-				i--
-			}
-			remoteAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:8053", host))
-			if err != nil {
-				r.logger.Warn().Err(err).Msg("error getting UDP addr")
-				continue
-			}
-
-			var failedAttemps int
-			var nextStatus time.Time
-
-		SessionLoop:
-			for {
-
-				// get rid of this endpoint, too many failed attemps
-				if failedAttemps != 0 {
-					time.Sleep(1 * time.Second)
-					if failedAttemps > 5 {
-						r.logger.Warn().Str("remote_addr", remoteAddr.String()).Msgf("removing endpoint after %d keep alive failed attemps", failedAttemps)
-						delete(r.cloudEndpoints, host)
-						continue ConnectionLoop
-					}
-				}
-
-				// build hello packet
-				buf := new(bytes.Buffer)
-				err = NewHelloCloudMessage().Write(buf, []byte(base64.StdEncoding.EncodeToString(r.deviceID.Key)))
-				if err != nil {
-					failedAttemps++
-					continue
-				}
-
-				_, err = r.cloudConnection.WriteToUDP(buf.Bytes(), remoteAddr)
-				if err != nil {
-					failedAttemps++
-					continue
-				}
-				r.logger.Debug().Str("remote_addr", remoteAddr.String()).Msg("sent hello cloud message")
-
-				select {
-				case helloAddr := <-keepAliveCh:
-					if helloAddr.String() == remoteAddr.String() {
-						break
-					} else {
-						r.logger.Warn().Str("remote_addr", remoteAddr.String()).Msgf("response to hello cloud message received from wrong address '%s'", helloAddr)
-						continue
-					}
-				case <-time.After(5 * time.Second):
-					r.logger.Debug().Str("remote_addr", remoteAddr.String()).Msg("response to hello cloud message timed out")
-					failedAttemps++
-					continue SessionLoop
-				}
-				r.logger.Debug().Str("remote_addr", remoteAddr.String()).Msg("received response to hello cloud message")
-
-				if incomingQueueCloudCh == nil {
-					cloudCh := make(chan *Method)
-					r.incomingQueuesLock.Lock()
-					r.incomingQueues["cloud"] = cloudCh
-					r.incomingQueuesLock.Unlock()
-					incomingQueueCloudCh = &cloudCh
-				}
-
-				// report status, if new connection
-				if nextStatus.IsZero() {
-					r.LocalSetStatus(MethodLocalStatusInternetConnected)
-					time.Sleep(time.Second)
-				}
-
-				// send internal info upstream
-				if nextStatus.Before(time.Now()) {
-					otcInfo, err := r.CloudOTCInfo(remoteAddr)
-					if err != nil {
-						r.logger.Warn().Str("remote_addr", remoteAddr.String()).Err(err).Msg("failed to report otc info")
-						failedAttemps++
-						continue SessionLoop
-					}
-
-					// schedule next run of status upload
-					nextStatus = time.Now().Add(time.Second * time.Duration(otcInfo.OTCTest.Interval))
-
-					// add hosts to endpoint list
-					for _, host := range otcInfo.OTCList {
-						r.cloudEndpoints[host.IP] = struct{}{}
-					}
-
-					// report status
-					r.LocalSetStatus(MethodLocalStatusCloudConnected)
-
-				}
-
-				failedAttemps = 0
-
-				select {
-				case m := <-*incomingQueueCloudCh:
-					mBytes, err := json.Marshal(m)
-					if err != nil {
-						r.logger.Warn().Err(err).Msg("error marshalling json cloud message")
-						continue
-					}
-
-					msg := NewCloudMessage()
-					msg.Body = mBytes
-
-					// build cloud message
-					buf := new(bytes.Buffer)
-					if err := msg.Write(buf, []byte(base64.StdEncoding.EncodeToString(r.deviceID.Key))); err != nil {
-						r.logger.Warn().Msg("error creating cloud message")
-						continue
-					}
-
-					_, err = r.cloudConnection.WriteToUDP(buf.Bytes(), remoteAddr)
-					if err != nil {
-						failedAttemps++
-						continue
-					}
-					r.logger.Debug().Str("remote_addr", remoteAddr.String()).Msg("sent message")
-				case <-time.After(15 * time.Second):
-					continue
-				}
-			}
-		}
-	}()
+	go r.runCloudKeepAlive()
 
 	// wait for exist signal
 	<-r.stopCh
@@ -501,10 +308,4 @@ func (r *Rockrobo) Run() error {
 	r.waitGroup.Wait()
 
 	return nil
-}
-
-func (r *Rockrobo) cloudRegisterID(id int, dataCh chan []byte) {
-	r.cloudSessionsLock.Lock()
-	r.cloudSessions[id] = dataCh
-	r.cloudSessionsLock.Unlock()
 }
