@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -140,36 +141,43 @@ func (c *localConnection) handle() {
 		}()
 
 		readySent := false
+		log := c.logger
 
 		for {
 			var method Method
 			err := d.Decode(&method)
 
 			if err == io.EOF {
-				c.logger.Debug().Msg("received EOF")
+				log.Debug().Msg("received EOF")
 				return
 			} else if err != nil {
 				c.logger.Warn().Err(err).Msg("error reading local connection")
 				return
 			}
-			c.logger.Debug().Interface("data", method).Msg("received data on local connection")
+			log.Debug().Interface("data", method).Msg("received data on local connection")
 
 			// if hello received for the frist time, signal readiness
 			if method.Method == MethodHello {
 				if !readySent {
 					close(readyCh)
+					log.Debug().Msg("readyCh now closed")
 					readySent = true
 				}
 				continue
 			}
 
+			channelName := method.Method
+			if !readySent && !strings.HasPrefix(method.Method, "_internal.") {
+				channelName = "cloud"
+			}
+
 			// retrieve correct channel
 			c.rockrobo.incomingQueuesLock.Lock()
-			dataCh, ok := c.rockrobo.incomingQueues[method.Method]
+			dataCh, ok := c.rockrobo.incomingQueues[channelName]
 			c.rockrobo.incomingQueuesLock.Unlock()
 
 			if !ok {
-				c.logger.Warn().Interface("method", method.Method).Msg("no channel to handle this method")
+				log.Warn().Interface("channel", channelName).Msg("no channel to handle this method")
 				continue
 			}
 
@@ -186,33 +194,36 @@ func (c *localConnection) handle() {
 		defer wg.Done()
 
 		var sendChannel *chan *Method
+		log := c.logger
 
 		// wait for ready or connection close
 		select {
 		case <-readyCh:
-			sendChannel = &c.rockrobo.outgoingQueue
+			sendChannel = &c.rockrobo.outgoingQueueInternal
+			log = log.With().Str("connection", "internal").Logger()
+			log.Debug().Msg("local connection ready")
 		case <-time.After(1 * time.Second):
-			sendChannel = &c.rockrobo.outgoingQueueApp
-			c.logger.Debug().Msg("looks like I am connected to a AppProxy")
+			sendChannel = &c.rockrobo.outgoingQueueAppProxy
+			log = log.With().Str("connection", "appproxy").Logger()
+			log.Debug().Msg("local connection ready")
 		case <-c.closeCh:
-			c.logger.Debug().Msg("break outgoing as connection closed")
+			log.Debug().Msg("break outgoing as connection closed")
 			return
 		}
 
 		e := json.NewEncoder(c.conn)
 
-		c.logger.Debug().Msg("local connection ready")
 		for {
 			select {
 			case obj := <-*sendChannel:
 				err := e.Encode(obj)
 				if err != nil {
-					c.logger.Warn().Err(err).Interface("data", obj).Msg("error sending data")
+					log.Warn().Err(err).Interface("data", obj).Msg("error sending data")
 				}
-				c.logger.Debug().Interface("data", obj).Msg("send data")
+				log.Debug().Interface("data", obj).Msg("send data")
 
 			case <-c.closeCh:
-				c.logger.Debug().Msg("break outgoing as connection closed")
+				log.Debug().Msg("break outgoing as connection closed")
 				return
 			}
 		}
@@ -278,7 +289,7 @@ func (r *Rockrobo) LocalSetStatus(status string) error {
 		return err
 	}
 
-	r.outgoingQueue <- &Method{
+	r.outgoingQueueAppProxy <- &Method{
 		Method: MethodLocalStatus,
 		Params: json.RawMessage(data),
 	}
@@ -289,7 +300,7 @@ func (r *Rockrobo) LocalSetStatus(status string) error {
 // start remote control mode
 func (r *Rockrobo) LocalAppRCStart() error {
 	r.appRCSequenceNumber = 1
-	r.outgoingQueueApp <- &Method{
+	r.outgoingQueueAppProxy <- &Method{
 		Method: MethodLocalAppRCStart,
 		ID:     r.rand.Int(),
 	}
@@ -309,7 +320,7 @@ func (r *Rockrobo) LocalAppRCEnd() error {
 	}
 	r.appRCSequenceNumber++
 
-	r.outgoingQueueApp <- &Method{
+	r.outgoingQueueAppProxy <- &Method{
 		Method: MethodLocalAppRCEnd,
 		ID:     r.rand.Int(),
 		Params: json.RawMessage(paramsData),
@@ -334,7 +345,7 @@ func (r *Rockrobo) LocalAppRCMove(velocity, omega float64, duration int) error {
 	}
 	r.appRCSequenceNumber++
 
-	r.outgoingQueueApp <- &Method{
+	r.outgoingQueueAppProxy <- &Method{
 		Method: MethodLocalAppRCMove,
 		ID:     r.rand.Int(),
 		Params: json.RawMessage(paramsData),

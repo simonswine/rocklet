@@ -31,8 +31,11 @@ type Rockrobo struct {
 
 	logger zerolog.Logger
 
-	outgoingQueueApp   chan *Method
-	outgoingQueue      chan *Method
+	// outgoing channel to app proxy
+	outgoingQueueAppProxy chan *Method
+	// outgoing channel to internal
+	outgoingQueueInternal chan *Method
+
 	incomingQueues     map[string]chan *Method
 	incomingQueuesLock sync.Mutex
 
@@ -57,11 +60,11 @@ func New(flags *api.Flags) *Rockrobo {
 			Str("app", "rocklet").
 			Logger().Level(zerolog.DebugLevel),
 
-		incomingQueues:   make(map[string]chan *Method),
-		outgoingQueue:    make(chan *Method, 0),
-		outgoingQueueApp: make(chan *Method, 0),
-		rand:             rand.New(rand.NewSource(time.Now().UnixNano())),
-		dir:              "/mnt/data/miio/",
+		incomingQueues:        make(map[string]chan *Method),
+		outgoingQueueInternal: make(chan *Method, 0),
+		outgoingQueueAppProxy: make(chan *Method, 0),
+		rand: rand.New(rand.NewSource(time.Now().UnixNano())),
+		dir:  "/mnt/data/miio/",
 	}
 
 	// generate new token
@@ -163,7 +166,7 @@ func (r *Rockrobo) retrieve(requestObj *Method, methodResponse string) (*Method,
 	}()
 
 	// write message
-	r.outgoingQueue <- requestObj
+	r.outgoingQueueInternal <- requestObj
 
 	// wait for response
 	// TODO add timeout
@@ -266,6 +269,13 @@ func (r *Rockrobo) Run() error {
 	go func() {
 	ConnectionLoop:
 		for {
+
+			// remove existing cloud forwarder
+			r.incomingQueuesLock.Lock()
+			delete(r.incomingQueues, "cloud")
+			r.incomingQueuesLock.Unlock()
+			var incomingQueueCloudCh *chan *Method
+
 			// look up cloud endpoints if none are available
 			if len(r.cloudEndpoints) == 0 {
 				hosts, err := net.LookupHost(CloudDNSName)
@@ -304,6 +314,8 @@ func (r *Rockrobo) Run() error {
 
 		SessionLoop:
 			for {
+
+				// get rid of this endpoint, too many failed attemps
 				if failedAttemps != 0 {
 					time.Sleep(1 * time.Second)
 					if failedAttemps > 5 {
@@ -343,6 +355,14 @@ func (r *Rockrobo) Run() error {
 				}
 				r.logger.Debug().Str("remote_addr", remoteAddr.String()).Msg("received response to hello cloud message")
 
+				if incomingQueueCloudCh == nil {
+					cloudCh := make(chan *Method)
+					r.incomingQueuesLock.Lock()
+					r.incomingQueues["cloud"] = cloudCh
+					r.incomingQueuesLock.Unlock()
+					incomingQueueCloudCh = &cloudCh
+				}
+
 				// report status, if new connection
 				if nextStatus.IsZero() {
 					r.LocalSetStatus(MethodLocalStatusInternetConnected)
@@ -373,51 +393,41 @@ func (r *Rockrobo) Run() error {
 
 				failedAttemps = 0
 
-				// TODO wait for response
-				time.Sleep(15 * time.Second)
+				select {
+				case m := <-*incomingQueueCloudCh:
+					mBytes, err := json.Marshal(m)
+					if err != nil {
+						r.logger.Warn().Err(err).Msg("error marshalling json cloud message")
+						continue
+					}
+
+					msg := NewCloudMessage()
+					msg.Body = mBytes
+
+					// build cloud message
+					buf := new(bytes.Buffer)
+					if err := msg.Write(buf, []byte(base64.StdEncoding.EncodeToString(r.deviceID.Key))); err != nil {
+						r.logger.Warn().Msg("error creating cloud message")
+						continue
+					}
+
+					_, err = r.cloudConnection.WriteToUDP(buf.Bytes(), remoteAddr)
+					if err != nil {
+						failedAttemps++
+						continue
+					}
+					r.logger.Debug().Str("remote_addr", remoteAddr.String()).Msg("sent message")
+				case <-time.After(15 * time.Second):
+					continue
+				}
 			}
 		}
 	}()
 
-	time.Sleep(5 * time.Second)
-
-	// start rc
-	if err := r.LocalAppRCStart(); err != nil {
-		return err
-	}
-
-	time.Sleep(10 * time.Second)
-
-	// move straight
-	if err := r.LocalAppRCMove(0.2, 0.0, 1500); err != nil {
-		return err
-	}
-	time.Sleep(5 * time.Second)
-
-	// turn
-	if err := r.LocalAppRCMove(0.0, -1.047200, 1500); err != nil {
-		return err
-	}
-	time.Sleep(1 * time.Second)
-
-	// move straight
-	if err := r.LocalAppRCMove(0.2, 0.0, 1500); err != nil {
-		return err
-	}
-	time.Sleep(1 * time.Second)
-
-	// move back
-	if err := r.LocalAppRCMove(-0.2, 0.0, 1500); err != nil {
-		return err
-	}
-
-	// stop rc
-	if err := r.LocalAppRCEnd(); err != nil {
-		return err
-	}
-
 	// wait for exist signal
 	<-r.stopCh
+
+	r.waitGroup.Wait()
 
 	return nil
 }
