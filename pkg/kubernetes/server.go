@@ -74,7 +74,7 @@ func (k *Kubernetes) remoteControlHandle(w http.ResponseWriter, req *http.Reques
 }
 
 func (k *Kubernetes) runServer() {
-	http.HandleFunc("/exec/default/remote-control-rockrobo/container", k.remoteControlHandle)
+	http.HandleFunc(fmt.Sprintf("/exec/default/remote-control-%s/container", k.nodeName), k.remoteControlHandle)
 	err := http.ListenAndServeTLS(fmt.Sprintf(":%d", k.flags.Kubernetes.KubeletPort), k.flags.Kubernetes.CertPath, k.flags.Kubernetes.KeyPath, nil)
 	if err != nil {
 		k.logger.Fatal().Err(err).Msg("ListenAndServe")
