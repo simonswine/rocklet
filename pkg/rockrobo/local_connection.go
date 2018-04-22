@@ -31,6 +31,12 @@ const (
 	MethodLocalAppRCStart = "app_rc_start"
 	MethodLocalAppRCEnd   = "app_rc_end"
 	MethodLocalAppRCMove  = "app_rc_move"
+
+	MethodLocalAppStart  = "app_rc_start"
+	MethodLocalAppStop   = "app_rc_end"
+	MethodLocalAppPause  = "app_pause"
+	MethodLocalAppSpot   = "app_spot"
+	MethodLocalAppCharge = "app_charge"
 )
 
 type Method struct {
@@ -351,6 +357,47 @@ func (r *Rockrobo) LocalAppRCMove(velocity, omega float64, duration int) error {
 		Params: json.RawMessage(paramsData),
 	}
 
+	return nil
+}
+
+// start cleaning
+func (r *Rockrobo) LocalAppStart() error {
+	r.outgoingQueueAppProxy <- &Method{
+		Method: MethodLocalAppStart,
+		ID:     r.rand.Int(),
+	}
+	return nil
+}
+
+func (r *Rockrobo) LocalAppStop() error {
+	r.outgoingQueueAppProxy <- &Method{
+		Method: MethodLocalAppStop,
+		ID:     r.rand.Int(),
+	}
+	return nil
+}
+
+func (r *Rockrobo) LocalAppPause() error {
+	r.outgoingQueueAppProxy <- &Method{
+		Method: MethodLocalAppPause,
+		ID:     r.rand.Int(),
+	}
+	return nil
+}
+
+func (r *Rockrobo) LocalAppSpot() error {
+	r.outgoingQueueAppProxy <- &Method{
+		Method: MethodLocalAppSpot,
+		ID:     r.rand.Int(),
+	}
+	return nil
+}
+
+func (r *Rockrobo) LocalAppCharge() error {
+	r.outgoingQueueAppProxy <- &Method{
+		Method: MethodLocalAppCharge,
+		ID:     r.rand.Int(),
+	}
 	return nil
 }
 

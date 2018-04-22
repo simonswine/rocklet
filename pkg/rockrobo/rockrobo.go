@@ -284,6 +284,11 @@ func (r *Rockrobo) Run() error {
 		return err
 	}
 
+	// listen to rpc on unix socket
+	if err := r.runRPCServer(); err != nil {
+		return err
+	}
+
 	// run http server for metrics/navmaps
 	r.waitGroup.Add(1)
 	go r.runHTTPServer()
