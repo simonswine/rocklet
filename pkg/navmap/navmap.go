@@ -124,13 +124,12 @@ func (n *NavMap) loopHTTPServer() {
 	log.Fatal(s.ListenAndServe())
 }
 
-func (n *NavMap) loopMaps() {
-	defer n.wg.Done()
+func (n *NavMap) LoopMaps(stopCh chan struct{}) {
 	c := time.Tick(200 * time.Millisecond)
 
 	lookup := func() {
 		err := n.lookupMaps()
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			n.logger.Warn().Err(err).Msg("error looking up maps")
 		}
 	}
@@ -196,7 +195,10 @@ func (n *NavMap) lookupMaps() error {
 func (n *NavMap) Run() error {
 
 	n.wg.Add(1)
-	go n.loopMaps()
+	go func() {
+		defer n.wg.Done()
+		n.LoopMaps(n.stopCh)
+	}()
 
 	n.wg.Add(1)
 	go n.loopHTTPServer()

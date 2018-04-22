@@ -21,6 +21,8 @@ import (
 const CloudDNSName = "ot.io.mi.com"
 
 type Rockrobo struct {
+	flags *api.Flags
+
 	CloudBindAddr     string
 	cloudConnection   *net.UDPConn
 	cloudEndpoints    map[string]struct{} // this is a maintained map of accessbile cloud endpoints
@@ -85,8 +87,9 @@ func New(flags *api.Flags) *Rockrobo {
 		incomingQueues:        make(map[string]chan *Method),
 		outgoingQueueInternal: make(chan *Method, 0),
 		outgoingQueueAppProxy: make(chan *Method, 0),
-		rand: rand.New(rand.NewSource(time.Now().UnixNano())),
-		dir:  "/mnt/data/miio/",
+		rand:  rand.New(rand.NewSource(time.Now().UnixNano())),
+		dir:   "/mnt/data/miio/",
+		flags: flags,
 	}
 
 	// initialize metrics
@@ -292,6 +295,19 @@ func (r *Rockrobo) Run() error {
 	// run http server for metrics/navmaps
 	r.waitGroup.Add(1)
 	go r.runHTTPServer()
+
+	// run navmap loop
+	go func() {
+		defer r.waitGroup.Done()
+		r.navMap.LoopMaps(r.stopCh)
+	}()
+
+	// test sqlite3 list
+	cleanings, err := navmap.ListCleanings(r.flags.RobotDatabase)
+	if err != nil {
+		return err
+	}
+	r.logger.Info().Msgf("%d cleanings found", len(cleanings))
 
 	// run local tcp connection handler
 	r.waitGroup.Add(1)

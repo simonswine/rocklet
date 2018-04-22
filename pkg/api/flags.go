@@ -5,6 +5,7 @@ type Flags struct {
 	DataDirectory    string
 	RuntimeDirectory string
 	Kubeconfig       string
+	RobotDatabase    string
 
 	Kubernetes struct {
 		KubeletPort int

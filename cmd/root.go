@@ -44,6 +44,7 @@ func init() {
 	// rockrobo flags
 	rootCmd.PersistentFlags().StringVarP(&flags.DataDirectory, "data-directory", "d", "/mnt/data/miio", "MIIO data directory")
 	rootCmd.PersistentFlags().StringVarP(&flags.RuntimeDirectory, "runtime-directory", "r", "/run/shm", "Runtime directory")
+	rootCmd.PersistentFlags().StringVar(&flags.RobotDatabase, "robot-database", "/mnt/data/rockrobo/robot.db", "Path to robot's sqlite3 database")
 
 	// kubernetes flags
 	rootCmd.PersistentFlags().StringVar(&flags.Kubeconfig, "kubeconfig", filepath.Join(u.HomeDir, ".kube/config"), "Path to kubeconfig")
