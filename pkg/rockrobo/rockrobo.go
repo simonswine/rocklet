@@ -303,7 +303,7 @@ func (r *Rockrobo) Run() error {
 	}()
 
 	// test sqlite3 list
-	cleanings, err := navmap.ListCleanings(r.flags.RobotDatabase)
+	cleanings, err := r.navMap.ListCleanings(r.flags.RobotDatabase)
 	if err != nil {
 		return err
 	}

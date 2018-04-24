@@ -6,6 +6,9 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"time"
@@ -23,6 +26,11 @@ type Cleaning struct {
 	Code         int
 	Complete     bool
 }
+
+const (
+	pixelWall   = 1
+	pixelInside = 255
+)
 
 func (n *NavMap) ListCleanings(databasePath string) (cleanings []*Cleaning, err error) {
 	db, err := sql.Open("sqlite3", databasePath)
@@ -78,20 +86,98 @@ func (n *NavMap) ListCleanings(databasePath string) (cleanings []*Cleaning, err 
 			return []*Cleaning{}, err
 		}
 
-		out, err := os.Create(fmt.Sprintf("map_%d.ppm", begin))
-		if err != nil {
+		if err := n.convertMap(reader); err != nil {
 			return []*Cleaning{}, err
 		}
-		defer out.Close()
-
-		_, err = io.Copy(out, reader)
-		if err != nil {
-			return []*Cleaning{}, err
-		}
-
 	}
 
 	return cleanings, nil
+
+}
+
+func (n *NavMap) parsePath(r io.Reader) error {
+	var header struct {
+		PointLength uint32
+		PointSize   uint32
+		Angle       uint32
+		ImageWidth1 uint16
+		ImageWidth2 uint16
+	}
+	if err := binary.Read(r, binary.LittleEndian, &header); err != nil {
+		return err
+	}
+	n.logger.Debug().Interface("header", &header).Msg("read path header")
+
+	var position struct {
+		X uint16
+		Y uint16
+	}
+
+	for i := 1; i < int(header.PointLength); i++ {
+		if err := binary.Read(r, binary.LittleEndian, &position); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (n *NavMap) drawMap(r io.Reader, out io.Writer) error {
+	var header struct {
+		Top    uint32
+		Left   uint32
+		Height uint32
+		Width  uint32
+	}
+	if err := binary.Read(r, binary.LittleEndian, &header); err != nil {
+		return err
+	}
+
+	buf := new(bytes.Buffer)
+	io.CopyN(buf, r, int64(header.Height*header.Width))
+
+	i := image.NewRGBA(image.Rectangle{
+		Min: image.Pt(0, 0),
+		Max: image.Pt(int(header.Width), int(header.Height)),
+	})
+
+	colorConvert := func(b byte) color.RGBA {
+		if b == pixelWall {
+			return color.RGBA{
+				R: 105,
+				G: 207,
+				B: 254,
+				A: 255,
+			}
+		} else if b == pixelInside {
+			return color.RGBA{
+				R: 33,
+				G: 115,
+				B: 187,
+				A: 255,
+			}
+		}
+		return color.RGBA{
+			R: b,
+			G: b,
+			B: b,
+			A: 255,
+		}
+	}
+
+	// write byte by byte
+	var width = int(header.Width)
+	var height = int(header.Height)
+
+	for pos, b := range buf.Bytes() {
+		i.SetRGBA((pos % width), height-((pos/width)+1), colorConvert(b))
+	}
+
+	if err := png.Encode(out, i); err != nil {
+		return fmt.Errorf("unable to encode image to png: %s", err)
+	}
+
+	return nil
 
 }
 
@@ -99,56 +185,60 @@ func (n *NavMap) convertMap(r io.Reader) error {
 
 	var header struct {
 		Magic           [2]byte
-		HeaderLen       int16
+		HeaderLen       uint16
 		ChecksumPointer [4]byte
-		MajorVer        int16
-		MinorVer        int16
-		MapIndex        int32
-		MapSequence     int32
+		MajorVer        uint16
+		MinorVer        uint16
+		MapIndex        uint32
+		MapSequence     uint32
 	}
 	if err := binary.Read(r, binary.LittleEndian, &header); err != nil {
 		return err
 	}
 	n.logger.Debug().Interface("header", &header).Msg("read map header")
 
-	var chargerPos struct {
-		X int32
-		Y int32
-	}
-
 	for {
 		var block struct {
-			Type    int16
-			Unknown [2]byte
-			Size    int32
+			Type   uint16
+			Header [2]byte
+			Size   uint32
 		}
-		if err := binary.Read(r, binary.LittleEndian, &block); err != nil {
+		if err := binary.Read(r, binary.LittleEndian, &block); err == io.EOF {
+			return nil
+		} else if err != nil {
 			return err
 		}
 		n.logger.Debug().Interface("block_header", &block).Msg("read block header")
 
-		buf := new(bytes.Buffer)
-		io.CopyN(buf, r, int64(block.Size))
-
 		if block.Type == 1 {
-			if err := binary.Read(r, binary.LittleEndian, &block); err != nil {
-				return err
-			}
 			// charger pos
+			var chargerPos struct {
+				X uint32
+				Y uint32
+			}
 			if err := binary.Read(r, binary.LittleEndian, &chargerPos); err != nil {
 				return err
 			}
+			n.logger.Debug().Msgf("%+v", chargerPos)
 		} else if block.Type == 2 {
-			// map
+			f, err := os.Create("/tmp/image.png")
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			if err := n.drawMap(r, f); err != nil {
+				return err
+			}
 		} else if block.Type == 3 {
-			// path
-		} else if block.Type < -1 || block.Type > 8 {
-			break
-		} else if block.Size > 0 {
-			n.logger.Debug().Msgf("unhandled block_type %d with length %d", block.Type, block.Size)
+			if err := n.parsePath(r); err != nil {
+				return err
+			}
+		} else {
+			buf := new(bytes.Buffer)
+			io.CopyN(buf, r, int64(block.Size))
+			n.logger.Debug().Str("data", fmt.Sprintf("%#+v", buf.Bytes())).Msgf("received unknown block_type %d with length %d", block.Type, block.Size)
 		}
 	}
-	n.logger.Debug().Msgf("%+v", chargerPos)
 
 	return nil
 }
