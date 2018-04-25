@@ -14,6 +14,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/simonswine/rocklet/pkg/api"
+	"github.com/simonswine/rocklet/pkg/apis/vacuum/v1alpha1"
+	"github.com/simonswine/rocklet/pkg/kubernetes"
 	"github.com/simonswine/rocklet/pkg/metrics"
 	"github.com/simonswine/rocklet/pkg/navmap"
 )
@@ -68,6 +70,11 @@ type Rockrobo struct {
 
 	// navmap module
 	navMap *navmap.NavMap
+
+	// kubernetes module
+	kubernetes     *kubernetes.Kubernetes
+	cleaningCh     chan *v1alpha1.Cleaning
+	vacuumStatusCh chan v1alpha1.VacuumStatus
 }
 
 func New(flags *api.Flags) *Rockrobo {
@@ -97,6 +104,13 @@ func New(flags *api.Flags) *Rockrobo {
 
 	// initialize navmap
 	r.navMap = navmap.New(flags)
+
+	// initialize kubernetes
+	if r.flags.Kubernetes.Enabled {
+		r.cleaningCh = make(chan *v1alpha1.Cleaning, 16)
+		r.vacuumStatusCh = make(chan v1alpha1.VacuumStatus)
+		r.kubernetes = kubernetes.NewInternal(flags, r.stopCh, r.vacuumStatusCh, r.cleaningCh)
+	}
 
 	// generate new token
 	r.nToken = make([]byte, 12)
@@ -275,6 +289,15 @@ func (r *Rockrobo) runHTTPServer() {
 	r.logger.Debug().Msg("stopping http server")
 }
 
+func (r *Rockrobo) CloudStart() {
+	// start udp receiver
+	r.waitGroup.Add(1)
+	go r.runCloudReceiver()
+
+	// keep alive cloud connection
+	go r.runCloudKeepAlive()
+}
+
 func (r *Rockrobo) Run() error {
 	// setup signal handling
 	sigs := make(chan os.Signal, 1)
@@ -285,6 +308,24 @@ func (r *Rockrobo) Run() error {
 	err := r.Listen()
 	if err != nil {
 		return err
+	}
+
+	// run kubernetes integration
+	if r.flags.Kubernetes.Enabled {
+		go r.kubernetes.Run()
+
+		// initial read of cleanings
+		go func() {
+			cleanings, err := r.navMap.ListCleanings()
+			if err != nil {
+				r.logger.Error().Err(err).Msg("error reading historic cleanings")
+				return
+			}
+			r.logger.Info().Msgf("%d cleanings found", len(cleanings))
+			for _, c := range cleanings {
+				r.cleaningCh <- c
+			}
+		}()
 	}
 
 	// listen to rpc on unix socket
@@ -302,13 +343,6 @@ func (r *Rockrobo) Run() error {
 		r.navMap.LoopMaps(r.stopCh)
 	}()
 
-	// test sqlite3 list
-	cleanings, err := r.navMap.ListCleanings(r.flags.RobotDatabase)
-	if err != nil {
-		return err
-	}
-	r.logger.Info().Msgf("%d cleanings found", len(cleanings))
-
 	// run local tcp connection handler
 	r.waitGroup.Add(1)
 	go r.runLocalConnectionHandler()
@@ -316,12 +350,9 @@ func (r *Rockrobo) Run() error {
 	// run local device init
 	go r.runLocalDeviceInit()
 
-	// start udp receiver
-	r.waitGroup.Add(1)
-	go r.runCloudReceiver()
-
-	// keep alive cloud connection
-	go r.runCloudKeepAlive()
+	if r.flags.Cloud.Enabled {
+		r.CloudStart()
+	}
 
 	// wait for exist signal
 	<-r.stopCh

@@ -10,10 +10,12 @@ import (
 	"image/color"
 	"image/png"
 	"io"
-	"os"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/simonswine/rocklet/pkg/apis/vacuum/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type Cleaning struct {
@@ -32,18 +34,20 @@ const (
 	pixelInside = 255
 )
 
-func (n *NavMap) ListCleanings(databasePath string) (cleanings []*Cleaning, err error) {
-	db, err := sql.Open("sqlite3", databasePath)
+func (n *NavMap) ListCleanings() (cleanings []*v1alpha1.Cleaning, err error) {
+	db, err := sql.Open("sqlite3", n.flags.RobotDatabase)
 	if err != nil {
-		return []*Cleaning{}, err
+		return []*v1alpha1.Cleaning{}, err
 	}
 	defer db.Close()
 
 	records, err := db.Query("SELECT begin, daybegin, end, code, duration, area, error, complete from cleanrecords;", nil)
 	if err != nil {
-		return []*Cleaning{}, err
+		return []*v1alpha1.Cleaning{}, err
 	}
 	defer records.Close()
+
+	indexByBegin := make(map[int64]*v1alpha1.Cleaning)
 
 	for records.Next() {
 		var begin, daybegin, end int64
@@ -53,23 +57,34 @@ func (n *NavMap) ListCleanings(databasePath string) (cleanings []*Cleaning, err 
 			return nil, err
 		}
 
-		cleaning := &Cleaning{
-			BeginTime:    time.Unix(begin, 0),
-			EndTime:      time.Unix(end, 0),
-			DayBeginTime: time.Unix(daybegin, 0),
-			Code:         code,
-			ErrorCode:    errcode,
-			Area:         area,
-			Duration:     time.Duration(duration),
-			Complete:     complete == 1,
+		completeValue := complete == 1
+
+		cleaning := &v1alpha1.Cleaning{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("%s-%d", n.flags.Kubernetes.NodeName, begin),
+			},
+			Spec: v1alpha1.CleaningSpec{
+				NodeName: n.flags.Kubernetes.NodeName,
+			},
+			Status: v1alpha1.CleaningStatus{
+				BeginTime:    &metav1.Time{time.Unix(begin, 0)},
+				EndTime:      &metav1.Time{time.Unix(end, 0)},
+				DayBeginTime: &metav1.Time{time.Unix(daybegin, 0)},
+				Code:         &code,
+				ErrorCode:    &errcode,
+				Area:         &area,
+				Duration:     (time.Second * time.Duration(duration)).String(),
+				Complete:     &completeValue,
+			},
 		}
+		indexByBegin[begin] = cleaning
 
 		cleanings = append(cleanings, cleaning)
 	}
 
 	maps, err := db.Query("SELECT begin, daybegin, map from cleanmaps;", nil)
 	if err != nil {
-		return []*Cleaning{}, err
+		return []*v1alpha1.Cleaning{}, err
 	}
 	defer maps.Close()
 
@@ -83,11 +98,18 @@ func (n *NavMap) ListCleanings(databasePath string) (cleanings []*Cleaning, err 
 
 		reader, err := gzip.NewReader(bytes.NewReader(mapData))
 		if err != nil {
-			return []*Cleaning{}, err
+			return []*v1alpha1.Cleaning{}, err
 		}
 
-		if err := n.convertMap(reader); err != nil {
-			return []*Cleaning{}, err
+		cleaning, ok := indexByBegin[begin]
+		if !ok {
+			n.Logger().Error().Time("begin", time.Unix(begin, 0)).Msg("can't match map to cleaning record")
+			continue
+		}
+
+		err = n.convertMap(reader, cleaning)
+		if err != nil {
+			return []*v1alpha1.Cleaning{}, err
 		}
 	}
 
@@ -95,7 +117,7 @@ func (n *NavMap) ListCleanings(databasePath string) (cleanings []*Cleaning, err 
 
 }
 
-func (n *NavMap) parsePath(r io.Reader) error {
+func (n *NavMap) parsePath(r io.Reader) ([]v1alpha1.Position, error) {
 	var header struct {
 		PointLength uint32
 		PointSize   uint32
@@ -104,22 +126,21 @@ func (n *NavMap) parsePath(r io.Reader) error {
 		ImageWidth2 uint16
 	}
 	if err := binary.Read(r, binary.LittleEndian, &header); err != nil {
-		return err
+		return []v1alpha1.Position{}, err
 	}
 	n.logger.Debug().Interface("header", &header).Msg("read path header")
 
-	var position struct {
-		X uint16
-		Y uint16
-	}
+	var path []v1alpha1.Position
+	var position v1alpha1.Position
 
 	for i := 1; i < int(header.PointLength); i++ {
 		if err := binary.Read(r, binary.LittleEndian, &position); err != nil {
-			return err
+			return []v1alpha1.Position{}, err
 		}
+		path = append(path, position)
 	}
 
-	return nil
+	return path, nil
 }
 
 func (n *NavMap) drawMap(r io.Reader, out io.Writer) error {
@@ -181,7 +202,7 @@ func (n *NavMap) drawMap(r io.Reader, out io.Writer) error {
 
 }
 
-func (n *NavMap) convertMap(r io.Reader) error {
+func (n *NavMap) convertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
 
 	var header struct {
 		Magic           [2]byte
@@ -220,19 +241,20 @@ func (n *NavMap) convertMap(r io.Reader) error {
 				return err
 			}
 			n.logger.Debug().Msgf("%+v", chargerPos)
+			cleaning.Status.Charger.X = uint16(chargerPos.X)
+			cleaning.Status.Charger.Y = uint16(chargerPos.Y)
 		} else if block.Type == 2 {
-			f, err := os.Create("/tmp/image.png")
+			buf := new(bytes.Buffer)
+			if err := n.drawMap(r, buf); err != nil {
+				return err
+			}
+			cleaning.Status.Map = buf.Bytes()
+		} else if block.Type == 3 {
+			path, err := n.parsePath(r)
 			if err != nil {
 				return err
 			}
-			defer f.Close()
-			if err := n.drawMap(r, f); err != nil {
-				return err
-			}
-		} else if block.Type == 3 {
-			if err := n.parsePath(r); err != nil {
-				return err
-			}
+			cleaning.Status.Path = path
 		} else {
 			buf := new(bytes.Buffer)
 			io.CopyN(buf, r, int64(block.Size))

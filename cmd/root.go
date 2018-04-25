@@ -45,9 +45,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&flags.DataDirectory, "data-directory", "d", "/mnt/data/miio", "MIIO data directory")
 	rootCmd.PersistentFlags().StringVarP(&flags.RuntimeDirectory, "runtime-directory", "r", "/run/shm", "Runtime directory")
 	rootCmd.PersistentFlags().StringVar(&flags.RobotDatabase, "robot-database", "/mnt/data/rockrobo/robot.db", "Path to robot's sqlite3 database")
+	rootCmd.PersistentFlags().BoolVar(&flags.Cloud.Enabled, "cloud", false, "Enable xiamio cloud forwarding")
 
 	// kubernetes flags
-	rootCmd.PersistentFlags().StringVar(&flags.Kubeconfig, "kubeconfig", filepath.Join(u.HomeDir, ".kube/config"), "Path to kubeconfig")
+	rootCmd.PersistentFlags().BoolVar(&flags.Kubernetes.Enabled, "kubernetes", false, "Enable kubernetes mode")
+	rootCmd.PersistentFlags().StringVar(&flags.Kubernetes.Kubeconfig, "kubeconfig", filepath.Join(u.HomeDir, ".kube/config"), "Path to kubeconfig")
 	rootCmd.PersistentFlags().IntVar(&flags.Kubernetes.KubeletPort, "kubelet-port", 10250, "Port for kubelet API to listen on")
 	rootCmd.PersistentFlags().StringVar(&flags.Kubernetes.CertPath, "kube-cert-path", "rockrobo.pem", "Path to kube ceritificate")
 	rootCmd.PersistentFlags().StringVar(&flags.Kubernetes.KeyPath, "kube-key-path", "rockrobo-key.pem", "Path to kube key")

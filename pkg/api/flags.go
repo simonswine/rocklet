@@ -4,10 +4,15 @@ type Flags struct {
 	Verbose          bool
 	DataDirectory    string
 	RuntimeDirectory string
-	Kubeconfig       string
 	RobotDatabase    string
 
+	Cloud struct {
+		Enabled bool
+	}
+
 	Kubernetes struct {
+		Enabled     bool
+		Kubeconfig  string
 		KubeletPort int
 
 		CertPath   string

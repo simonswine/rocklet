@@ -19,6 +19,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/simonswine/rocklet/pkg/api"
+	"github.com/simonswine/rocklet/pkg/apis/vacuum/v1alpha1"
 )
 
 type NavMap struct {
@@ -242,27 +243,6 @@ func ConvertMapToJPEG(input io.Reader, output io.Writer) error {
 	return nil
 }
 
-/*
-func main() {
-
-	serveMux := http.NewServeMux()
-	serveMux.HandleFunc("/mjpeg", mjpeg)
-
-	log.Printf("start listen on %s\n", listen)
-	if err := http.ListenAndServe(listen, serveMux); nil != err {
-		log.Printf("Error: %s", err.Error())
-	}
-
-	in, err := os.OpenFile("navmap.ppm", os.O_RDONLY, 0)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
-	out, err := os.Create("image.jpg")
-	if err != nil {
-		log.Fatal(err)
-	}
-
+func (n *NavMap) WatchCleaning() (chan *v1alpha1.Cleaning, error) {
+	return nil, fmt.Errorf("unimplemented")
 }
-*/

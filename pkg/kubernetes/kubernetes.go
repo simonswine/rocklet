@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	"github.com/simonswine/rocklet/pkg/api"
+	"github.com/simonswine/rocklet/pkg/apis/vacuum/v1alpha1"
+	vacuum "github.com/simonswine/rocklet/pkg/client/clientset/versioned/typed/vacuum/v1alpha1"
 )
 
 type Kubernetes struct {
@@ -29,10 +31,17 @@ type Kubernetes struct {
 	// Reference to this node.
 	nodeRef *v1.ObjectReference
 
-	kubeClient kubernetes.Interface
+	kubeClient   kubernetes.Interface
+	vacuumClient vacuum.VacuumV1alpha1Interface
 
 	// for internal book keeping; access only from within registerWithApiserver
 	registrationCompleted bool
+
+	// channel for vacuum status updates
+	vacuumStatusCh chan v1alpha1.VacuumStatus
+
+	// channel for cleanings
+	cleaningCh chan *v1alpha1.Cleaning
 
 	fakePodsCompleted bool
 }
@@ -60,12 +69,17 @@ func (k *Kubernetes) Run() error {
 		Namespace: "",
 	}
 
-	config, err := clientcmd.BuildConfigFromFlags("", k.flags.Kubeconfig)
+	config, err := clientcmd.BuildConfigFromFlags("", k.flags.Kubernetes.Kubeconfig)
 	if err != nil {
 		return err
 	}
 
 	k.kubeClient, err = kubernetes.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	k.vacuumClient, err = vacuum.NewForConfig(config)
 	if err != nil {
 		return err
 	}
@@ -79,11 +93,30 @@ func (k *Kubernetes) Run() error {
 		Host:      k.nodeName,
 	})
 
-	for {
-		k.logger.Debug().Msg("sync node status")
-		k.syncNodeStatus()
-		time.Sleep(15 * time.Second)
+	nodeStatusTicker := time.NewTicker(15 * time.Second)
+
+	if k.cleaningCh == nil {
+		k.cleaningCh = make(chan *v1alpha1.Cleaning)
 	}
+
+	for {
+		select {
+		case c := <-k.cleaningCh:
+			go func() {
+				err := k.ensureCleaning(c)
+				if err != nil {
+					k.Logger().Warn().Err(err).Msgf("failed to upload cleaning %s", c.Name)
+				}
+			}()
+		case <-nodeStatusTicker.C:
+			k.logger.Debug().Msg("sync node status")
+			k.syncNodeStatus()
+		case <-k.stopCh:
+			break
+		}
+	}
+
+	k.logger.Info().Msg("kubernetes is exiting")
 
 	return nil
 
@@ -97,5 +130,13 @@ func New(flags *api.Flags) *Kubernetes {
 			Logger().Level(zerolog.DebugLevel),
 		flags: flags,
 	}
+	return k
+}
+
+func NewInternal(flags *api.Flags, stopCh chan struct{}, statusCh chan v1alpha1.VacuumStatus, cleaningCh chan *v1alpha1.Cleaning) *Kubernetes {
+	k := New(flags)
+	k.stopCh = stopCh
+	k.vacuumStatusCh = statusCh
+	k.cleaningCh = cleaningCh
 	return k
 }
