@@ -13,6 +13,7 @@ docker_build_image:
 # Building ARM Binary
 build_arm:
 	GOOS=linux GOARCH=arm GOARM=7 CC=arm-linux-gnueabihf-gcc CGO_ENABLED=1 go build -o rocklet_arm
+	# Example building tests for arm: GOOS=linux GOARCH=arm GOARM=7 CC=arm-linux-gnueabihf-gcc CGO_ENABLED=1 go test -c -o rocklet_arm ./pkg/navmap/
 
 # Sync binary to rockrobo
 rockrobo_sync:

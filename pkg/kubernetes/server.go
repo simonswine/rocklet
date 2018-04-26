@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"time"
 
@@ -16,8 +17,13 @@ import (
 
 func (k *Kubernetes) ExecInContainer(name string, uid types.UID, container string, cmd []string, stdin io.Reader, stdout, stderr io.WriteCloser, tty bool, resize <-chan remotecommand.TerminalSize, timeout time.Duration) error {
 
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("unable to find my own executable: %s", err)
+	}
+
 	// Create arbitrary command.
-	c := exec.Command("bash")
+	c := exec.Command(executable, "ui")
 
 	// Start the command with a pty.
 	ptmx, err := pty.Start(c)
