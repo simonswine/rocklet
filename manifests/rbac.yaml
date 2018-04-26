@@ -1,0 +1,29 @@
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: rockrobo-brendan
+rules:
+  - apiGroups: ["vacuum.swine.de"]
+    resources: ["cleanings"]
+    verbs: ["*"]
+  - apiGroups: ["vacuum.swine.de"]
+    resources: ["vacuums"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: rockrobo-brendan
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rockrobo-brendan
+subjects:
+  - name: system:node:rockrobo
+    kind: User
+  - name: system:node:rockrobo-brendan
+    kind: User
+  - name: system:node:rockrobo-craig
+    kind: User
+  - name: system:node:rockrobo-joe
+    kind: User

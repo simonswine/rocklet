@@ -1,0 +1,29 @@
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: vacuums.vacuum.swine.de
+spec:
+  group: vacuum.swine.de
+  version: v1alpha1
+  scope: Namespaced
+  names:
+    plural: vacuums
+    singular: vacuum
+    kind: Vacuum
+    shortNames:
+    - va
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: cleanings.vacuum.swine.de
+spec:
+  group: vacuum.swine.de
+  version: v1alpha1
+  scope: Namespaced
+  names:
+    plural: cleanings
+    singular: cleaning
+    kind: Cleaning
+    shortNames:
+    - clean
