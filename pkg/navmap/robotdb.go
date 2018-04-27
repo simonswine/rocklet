@@ -117,33 +117,43 @@ func (n *NavMap) ListCleanings() (cleanings []*v1alpha1.Cleaning, err error) {
 
 }
 
-func (n *NavMap) parsePath(r io.Reader) ([]v1alpha1.Position, error) {
+type position struct {
+	X uint16
+	Y uint16
+}
+
+type chargerPos struct {
+	X uint32
+	Y uint32
+}
+
+func (n *NavMap) parsePath(r io.Reader) ([]position, error) {
 	var header struct {
 		PointLength uint32
 		PointSize   uint32
 		Angle       uint32
-		ImageWidth1 uint16
-		ImageWidth2 uint16
+		ImageWidth  uint16
+		ImageHeight uint16
 	}
 	if err := binary.Read(r, binary.LittleEndian, &header); err != nil {
-		return []v1alpha1.Position{}, err
+		return []position{}, err
 	}
 	n.logger.Debug().Interface("header", &header).Msg("read path header")
 
-	var path []v1alpha1.Position
-	var position v1alpha1.Position
+	var path []position
+	var pos position
 
 	for i := 1; i < int(header.PointLength); i++ {
-		if err := binary.Read(r, binary.LittleEndian, &position); err != nil {
-			return []v1alpha1.Position{}, err
+		if err := binary.Read(r, binary.LittleEndian, &pos); err != nil {
+			return []position{}, err
 		}
-		path = append(path, position)
+		path = append(path, pos)
 	}
 
 	return path, nil
 }
 
-func (n *NavMap) drawMap(r io.Reader, out io.Writer) error {
+func (n *NavMap) drawMap(r io.Reader) (*v1alpha1.Map, error) {
 	var header struct {
 		Top    uint32
 		Left   uint32
@@ -151,8 +161,9 @@ func (n *NavMap) drawMap(r io.Reader, out io.Writer) error {
 		Width  uint32
 	}
 	if err := binary.Read(r, binary.LittleEndian, &header); err != nil {
-		return err
+		return nil, err
 	}
+	n.logger.Debug().Interface("header", &header).Msg("read image header")
 
 	buf := new(bytes.Buffer)
 	io.CopyN(buf, r, int64(header.Height*header.Width))
@@ -194,11 +205,18 @@ func (n *NavMap) drawMap(r io.Reader, out io.Writer) error {
 		i.SetRGBA((pos % width), height-((pos/width)+1), colorConvert(b))
 	}
 
-	if err := png.Encode(out, i); err != nil {
-		return fmt.Errorf("unable to encode image to png: %s", err)
+	buf = new(bytes.Buffer)
+	if err := png.Encode(buf, i); err != nil {
+		return nil, fmt.Errorf("unable to encode image to png: %s", err)
 	}
 
-	return nil
+	return &v1alpha1.Map{
+		Top:    header.Top,
+		Left:   header.Left,
+		Height: header.Height,
+		Width:  header.Width,
+		Data:   buf.Bytes(),
+	}, nil
 
 }
 
@@ -218,6 +236,9 @@ func (n *NavMap) convertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
 	}
 	n.logger.Debug().Interface("header", &header).Msg("read map header")
 
+	var charger *chargerPos
+	var path *[]position
+
 	for {
 		var block struct {
 			Type   uint16
@@ -225,7 +246,7 @@ func (n *NavMap) convertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
 			Size   uint32
 		}
 		if err := binary.Read(r, binary.LittleEndian, &block); err == io.EOF {
-			return nil
+			break
 		} else if err != nil {
 			return err
 		}
@@ -233,28 +254,24 @@ func (n *NavMap) convertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
 
 		if block.Type == 1 {
 			// charger pos
-			var chargerPos struct {
-				X uint32
-				Y uint32
-			}
-			if err := binary.Read(r, binary.LittleEndian, &chargerPos); err != nil {
+			var ch chargerPos
+			if err := binary.Read(r, binary.LittleEndian, &ch); err != nil {
 				return err
 			}
-			n.logger.Debug().Msgf("%+v", chargerPos)
-			cleaning.Status.Charger.X = uint16(chargerPos.X)
-			cleaning.Status.Charger.Y = uint16(chargerPos.Y)
+			n.logger.Debug().Msgf("%+v", ch)
+			charger = &ch
 		} else if block.Type == 2 {
-			buf := new(bytes.Buffer)
-			if err := n.drawMap(r, buf); err != nil {
-				return err
-			}
-			cleaning.Status.Map = buf.Bytes()
-		} else if block.Type == 3 {
-			path, err := n.parsePath(r)
+			m, err := n.drawMap(r)
 			if err != nil {
 				return err
 			}
-			cleaning.Status.Path = path
+			cleaning.Status.Map = m
+		} else if block.Type == 3 {
+			p, err := n.parsePath(r)
+			if err != nil {
+				return err
+			}
+			path = &p
 		} else {
 			buf := new(bytes.Buffer)
 			io.CopyN(buf, r, int64(block.Size))
@@ -262,5 +279,29 @@ func (n *NavMap) convertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
 		}
 	}
 
+	if cleaning.Status.Map == nil {
+		fmt.Errorf("no map found")
+	}
+
+	if path != nil {
+		p := *path
+		cleaning.Status.Path = make([]v1alpha1.Position, len(p))
+		for i, _ := range p {
+			cleaning.Status.Path[i] = positionInMapDimensions(cleaning.Status.Map, uint32(p[i].X), uint32(p[i].Y))
+		}
+	}
+
+	if charger != nil {
+		cleaning.Status.Charger = positionInMapDimensions(cleaning.Status.Map, charger.X, charger.Y)
+	}
+
 	return nil
+}
+
+// converts coordinates into pngs dimensions
+func positionInMapDimensions(m *v1alpha1.Map, X uint32, Y uint32) v1alpha1.Position {
+	return v1alpha1.Position{
+		X: (float32(X) * 0.02) - float32(m.Left),
+		Y: (float32(Y) * 0.02) - float32(m.Top),
+	}
 }

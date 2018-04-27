@@ -56,7 +56,7 @@ func TestListCleaning(t *testing.T) {
 	defer os.RemoveAll(tmpDir) // clean up
 
 	for _, c := range cleanings {
-		err = ioutil.WriteFile(fmt.Sprintf("%s/%s-map.png", tmpDir, c.Name), c.Status.Map, 0644)
+		err = ioutil.WriteFile(fmt.Sprintf("%s/%s-map.png", tmpDir, c.Name), c.Status.Map.Data, 0644)
 		if err != nil {
 			t.Error("unexpected error", err)
 		}
@@ -83,7 +83,7 @@ func TestConvertMap(t *testing.T) {
 		t.Error("unexpected error", err)
 	}
 
-	if exp, act := "c529919af8f8c1e26955367dbfceabb95a1d1f204f0cc04165f357f9d8bbe4da", fmt.Sprintf("%x", sha256.Sum256(cleaning.Status.Map)); exp != act {
+	if exp, act := "c529919af8f8c1e26955367dbfceabb95a1d1f204f0cc04165f357f9d8bbe4da", fmt.Sprintf("%x", sha256.Sum256(cleaning.Status.Map.Data)); exp != act {
 		t.Errorf("unexpected result exp=%v act=%v", exp, act)
 	}
 

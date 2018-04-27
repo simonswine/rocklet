@@ -112,7 +112,7 @@ type CleaningSpec struct {
 
 type CleaningStatus struct {
 	State        string       `json:"state,omitempty"`
-	Map          []byte       `json:"map,omitempty"`
+	Map          *Map         `json:"map,omitempty"`
 	Path         []Position   `json:"path,omitempty"`
 	Charger      Position     `json:"charger,omitempty"`
 	BeginTime    *metav1.Time `json:"beginTime,omitempty"`
@@ -126,6 +126,14 @@ type CleaningStatus struct {
 }
 
 type Position struct {
-	X uint16 `json:"x,omitempty"`
-	Y uint16 `json:"y,omitempty"`
+	X float32 `json:"x,omitempty"`
+	Y float32 `json:"y,omitempty"`
+}
+
+type Map struct {
+	Data   []byte `json:"data,omitemtpy"`
+	Width  uint32 `json:"width,omitempty"`
+	Height uint32 `json:"height,omitempty"`
+	Left   uint32 `json:"left,omitempty"`
+	Top    uint32 `json:"top,omitempty"`
 }
