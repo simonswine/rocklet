@@ -302,6 +302,6 @@ func (n *NavMap) convertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
 func positionInMapDimensions(m *v1alpha1.Map, X uint32, Y uint32) v1alpha1.Position {
 	return v1alpha1.Position{
 		X: (float32(X) * 0.02) - float32(m.Left),
-		Y: (float32(Y) * 0.02) - float32(m.Top),
+		Y: float32(m.Height) - (float32(Y) * 0.02) + float32(m.Top),
 	}
 }
