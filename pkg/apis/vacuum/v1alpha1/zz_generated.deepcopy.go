@@ -320,16 +320,19 @@ func (in *VacuumStatus) DeepCopyInto(out *VacuumStatus) {
 	*out = *in
 	if in.Map != nil {
 		in, out := &in.Map, &out.Map
-		*out = make([]byte, len(*in))
-		copy(*out, *in)
-	}
-	out.Position = in.Position
-	if in.Area != nil {
-		in, out := &in.Area, &out.Area
 		if *in == nil {
 			*out = nil
 		} else {
-			*out = new(int)
+			*out = new(Map)
+			(*in).DeepCopyInto(*out)
+		}
+	}
+	if in.Position != nil {
+		in, out := &in.Position, &out.Position
+		if *in == nil {
+			*out = nil
+		} else {
+			*out = new(Position)
 			**out = **in
 		}
 	}

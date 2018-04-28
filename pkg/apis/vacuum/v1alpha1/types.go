@@ -75,11 +75,19 @@ type VacuumSpec struct {
 }
 
 type VacuumStatus struct {
-	State    string   `json:"state,omitempty"`
-	Map      []byte   `json:map,omitempty""`
-	Position Position `json:"path,omitempty"`
-	Duration string   `json:"duration,omitempty"`
-	Area     *int     `json:"area,omitempty"`
+	State        string    `json:"state"`
+	Map          *Map      `json:"map,omitempty"`
+	Position     *Position `json:"path,omitempty"`
+	Duration     string    `json:"duration`
+	Area         int       `json:"area"`
+	BatteryLevel int       `json:"batteryLevel"`
+	FanPower     int       `json:"fanPower"`
+	DoNotDisturb bool      `json:"doNotDisturb"`
+	ErrorCode    int       `json:"errorCode"`
+	DeviceID     int       `json:"deviceID"`
+	MAC          string    `json:"mac"`
+	WifiSSID     string    `json:"wifiSSID"`
+	WifiRSSI     int       `json:"wifiRSSI"`
 }
 
 // +genclient

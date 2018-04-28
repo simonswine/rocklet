@@ -108,7 +108,7 @@ func (n *NavMap) ListCleanings() (cleanings []*v1alpha1.Cleaning, err error) {
 			continue
 		}
 
-		err = n.convertMap(reader, cleaning)
+		err = n.ConvertMap(reader, cleaning)
 		if err != nil {
 			return []*v1alpha1.Cleaning{}, err
 		}
@@ -223,7 +223,7 @@ func (n *NavMap) drawMap(r io.Reader) (*v1alpha1.Map, error) {
 
 }
 
-func (n *NavMap) convertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
+func (n *NavMap) ConvertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
 
 	var header struct {
 		Magic           [2]byte

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -111,6 +112,7 @@ func (n *NavMap) Logger() *zerolog.Logger {
 func (n *NavMap) SetupHandler(serveMux *http.ServeMux) {
 	serveMux.HandleFunc("/navmap/jpeg", n.handleJPEG)
 	serveMux.HandleFunc("/navmap/png", n.handlePNG)
+	serveMux.HandleFunc("/navmap/upload", n.handleMapUpload)
 }
 
 func (n *NavMap) loopHTTPServer() {
@@ -245,4 +247,12 @@ func ConvertMapToJPEG(input io.Reader, output io.Writer) error {
 
 func (n *NavMap) WatchCleaning() (chan *v1alpha1.Cleaning, error) {
 	return nil, fmt.Errorf("unimplemented")
+}
+
+func (n *NavMap) handleMapUpload(w http.ResponseWriter, r *http.Request) {
+	rd, err := httputil.DumpRequest(r, true)
+	if err == nil {
+		n.logger.Info().Str("request", string(rd)).Msg("go away - no upload here")
+	}
+	http.Error(w, "not found", 404)
 }

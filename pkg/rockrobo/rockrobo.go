@@ -1,8 +1,10 @@
 package rockrobo
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -182,7 +184,7 @@ func (r *Rockrobo) Listen() (err error) {
 
 func (r *Rockrobo) GetInternalInfo() (*MethodParamsResponseInternalInfo, error) {
 	// retrieve device ID
-	response, err := r.retrieve(
+	response, err := r.retrieveInternal(
 		&Method{
 			Method: MethodInternalInfo,
 		},
@@ -209,7 +211,7 @@ func (r *Rockrobo) GetToken() (token []byte, err error) {
 	})
 
 	// retrieve token
-	response, err := r.retrieve(
+	response, err := r.retrieveInternal(
 		&Method{
 			Method: MethodRequestToken,
 			Params: reqParams,
@@ -228,21 +230,44 @@ func (r *Rockrobo) GetToken() (token []byte, err error) {
 	return token, nil
 }
 
-func (r *Rockrobo) retrieve(requestObj *Method, methodResponse string) (*Method, error) {
+func (r *Rockrobo) retrieve(requestObj *Method, methodResponse string, outgoing chan *Method) (*Method, error) {
 	dataCh := make(chan *Method)
 
-	// setup, remove channel callback
-	r.incomingQueuesLock.Lock()
-	r.incomingQueues[methodResponse] = dataCh
-	r.incomingQueuesLock.Unlock()
-	defer func() {
+	repsonseHandled := false
+	// handle id based call back
+	if requestObj.ID != 0 {
+		idKey := fmt.Sprintf("id=%d", requestObj.ID)
 		r.incomingQueuesLock.Lock()
-		delete(r.incomingQueues, methodResponse)
+		r.incomingQueues[idKey] = dataCh
 		r.incomingQueuesLock.Unlock()
-	}()
+		defer func() {
+			r.incomingQueuesLock.Lock()
+			delete(r.incomingQueues, idKey)
+			r.incomingQueuesLock.Unlock()
+		}()
+		repsonseHandled = true
+	}
+
+	// handle method resposne callback
+	if methodResponse != "" {
+		r.incomingQueuesLock.Lock()
+		r.incomingQueues[methodResponse] = dataCh
+		r.incomingQueuesLock.Unlock()
+		defer func() {
+			r.incomingQueuesLock.Lock()
+			delete(r.incomingQueues, methodResponse)
+			r.incomingQueuesLock.Unlock()
+		}()
+		repsonseHandled = true
+	}
+
+	if !repsonseHandled {
+		return nil, fmt.Errorf("no callback setup for this method: %+v", requestObj)
+
+	}
 
 	// write message
-	r.outgoingQueueInternal <- requestObj
+	outgoing <- requestObj
 
 	// wait for response
 	// TODO add timeout
@@ -251,6 +276,17 @@ func (r *Rockrobo) retrieve(requestObj *Method, methodResponse string) (*Method,
 	r.Logger().Debug().Interface("resp", resp).Msg("data received")
 
 	return resp, nil
+}
+
+func (r *Rockrobo) retrieveAppProxy(requestObj *Method) (*Method, error) {
+	if requestObj.ID == 0 {
+		requestObj.ID = r.rand.Int()
+	}
+	return r.retrieve(requestObj, "", r.outgoingQueueAppProxy)
+}
+
+func (r *Rockrobo) retrieveInternal(requestObj *Method, methodResponse string) (*Method, error) {
+	return r.retrieve(requestObj, methodResponse, r.outgoingQueueInternal)
 }
 
 // handle sigterm sigint
@@ -276,7 +312,6 @@ func (r *Rockrobo) runHTTPServer() {
 
 	// setup metrics
 	serveMux.Handle("/metrics", r.metrics.Handler())
-	r.metrics.BatteryLevel.WithLabelValues("test").Set(91.11)
 
 	// serve http
 	if err := http.Serve(r.httpListener, serveMux); err != nil {
@@ -326,6 +361,69 @@ func (r *Rockrobo) Run() error {
 				r.cleaningCh <- c
 			}
 		}()
+
+		// send status updates every 15 seconds
+		go func() {
+			// wait for device ready
+			<-r.localDeviceReadyCh
+
+			ticker := time.NewTicker(2 * time.Second).C
+
+			for {
+				<-ticker
+				status, err := r.LocalGetStatus()
+				if err != nil {
+					r.logger.Warn().Err(err).Msg("error getting status from device")
+				}
+
+				state, ok := v1alpha1.VacuumStateHash[status.State]
+				if !ok {
+					r.logger.Warn().Int("state", status.State).Msg("cannot map state with known status")
+					state = v1alpha1.VacuumStateUnknown
+				}
+
+				vacuumStatus := &v1alpha1.VacuumStatus{
+					Area:         status.CleanArea,
+					Duration:     (time.Second * time.Duration(status.CleanTime)).String(),
+					BatteryLevel: status.Battery,
+					FanPower:     status.FanPower,
+					DoNotDisturb: status.DNDEnabled == 1,
+					State:        state,
+					ErrorCode:    status.ErrorCode,
+				}
+
+				r.metrics.BatteryLevel.WithLabelValues(r.flags.Kubernetes.NodeName).Set(float64(status.Battery))
+
+				if r.deviceID != nil {
+					vacuumStatus.MAC = r.deviceID.MAC
+					vacuumStatus.DeviceID = r.deviceID.DeviceID
+				}
+
+				internalInfo, err := r.GetInternalInfo()
+				if err != nil {
+					r.logger.Warn().Err(err).Msg("cannot get internal info")
+				} else {
+					vacuumStatus.WifiSSID = internalInfo.AccessPoint.SSID
+					vacuumStatus.WifiRSSI = internalInfo.AccessPoint.RSSI
+				}
+
+				// Retrieve map if file available
+				dat, err := ioutil.ReadFile(r.flags.AppProxyMapPath)
+				if err == nil {
+					var c v1alpha1.Cleaning
+					err := r.navMap.ConvertMap(bytes.NewReader(dat), &c)
+					if err != nil {
+						r.logger.Warn().Err(err).Msg("error converting map")
+					}
+					vacuumStatus.Map = c.Status.Map
+				} else if !os.IsNotExist(err) {
+					r.logger.Warn().Err(err).Msg("error reading map")
+				}
+
+				r.logger.Info().Interface("status", vacuumStatus).Msg("got status from device")
+
+			}
+		}()
 	}
 
 	// listen to rpc on unix socket
@@ -341,6 +439,53 @@ func (r *Rockrobo) Run() error {
 	go func() {
 		defer r.waitGroup.Done()
 		r.navMap.LoopMaps(r.stopCh)
+	}()
+
+	// uploads handler
+	r.waitGroup.Add(1)
+	go func() {
+		defer r.waitGroup.Done()
+		dataCh := make(chan *Method)
+
+		r.incomingQueuesLock.Lock()
+		r.incomingQueues["_sync.gen_presigned_url"] = dataCh
+		r.incomingQueuesLock.Unlock()
+
+		result := struct {
+			URL     string `json:"url"`
+			ObjName string `json:"obj_name"`
+			Method  string `json:"method"`
+			Time    int64  `json:"time"`
+			Ok      bool   `json:"ok"`
+			Pwd     string `json:"pwd"`
+		}{}
+
+		for {
+			select {
+			case m := <-dataCh:
+
+				result.Method = "PUT"
+				result.Time = time.Now().UnixNano()
+				result.ObjName = r.flags.Kubernetes.NodeName
+				result.Pwd = "secret"
+				result.Ok = true
+				result.URL = "http://127.0.0.1:54320/navmap/upload"
+
+				resultData, err := json.Marshal(&result)
+				if err != nil {
+					r.logger.Warn().Err(err).Msg("error responding to upload")
+				}
+
+				r.outgoingQueueAppProxy <- &Method{
+					ID:     m.ID,
+					Result: json.RawMessage(resultData),
+				}
+
+			case <-r.stopCh:
+				return
+			}
+		}
+
 	}()
 
 	// run local tcp connection handler

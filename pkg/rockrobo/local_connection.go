@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +36,9 @@ const (
 	MethodLocalAppPause  = "app_pause"
 	MethodLocalAppSpot   = "app_spot"
 	MethodLocalAppCharge = "app_charge"
+
+	MethodLocalGetStatus       = "get_status"
+	MethodLocalGetSerialNumber = "get_serial_number"
 )
 
 type Method struct {
@@ -107,6 +109,20 @@ type MethodResultOTCTest struct {
 	Interval  int      `json:"interval"`
 }
 
+type MethodResultResponseGetStatus struct {
+	Battery    int `json:"battery"`
+	CleanArea  int `json:"clean_area"`
+	CleanTime  int `json:"clean_time"`
+	DNDEnabled int `json:"dnd_enabled"`
+	ErrorCode  int `json:"error_code"`
+	FanPower   int `json:"fan_power"`
+	InCleaning int `json:"in_cleaning"`
+	MapPresent int `json:"map_present"`
+	MsgSeq     int `json:"msg_seq"`
+	MsgVer     int `json:"msg_ver"`
+	State      int `json:"state"`
+}
+
 type localConnection struct {
 	rockrobo *Rockrobo
 	conn     net.Conn
@@ -173,17 +189,26 @@ func (c *localConnection) handle() {
 			}
 
 			channelName := method.Method
-			if !readySent && !strings.HasPrefix(method.Method, "_internal.") {
-				channelName = "cloud"
-			}
 
 			// retrieve correct channel
+			var dataCh chan *Method
+			var ok bool
 			c.rockrobo.incomingQueuesLock.Lock()
-			dataCh, ok := c.rockrobo.incomingQueues[channelName]
+
+			// try to find the method ID
+			if method.ID != 0 {
+				idKey := fmt.Sprintf("id=%d", method.ID)
+				dataCh, ok = c.rockrobo.incomingQueues[idKey]
+			}
+
+			// no id channel found, try the name
+			if !ok {
+				dataCh, ok = c.rockrobo.incomingQueues[channelName]
+			}
 			c.rockrobo.incomingQueuesLock.Unlock()
 
 			if !ok {
-				log.Warn().Interface("channel", channelName).Msg("no channel to handle this method")
+				log.Warn().Str("channel", channelName).Int("id", method.ID).Msg("no channel to handle this method")
 				continue
 			}
 
@@ -243,7 +268,7 @@ func (c *localConnection) handle() {
 // discover local device ID
 func (r *Rockrobo) LocalDeviceID() (*MethodParamsResponseDeviceID, error) {
 	// retrieve device ID
-	response, err := r.retrieve(
+	response, err := r.retrieveInternal(
 		&Method{
 			Method: MethodRequestDeviceID,
 			Params: json.RawMessage(fmt.Sprintf(`"%s"`, r.dir)),
@@ -264,10 +289,36 @@ func (r *Rockrobo) LocalDeviceID() (*MethodParamsResponseDeviceID, error) {
 
 }
 
+// get the vacuum status from local
+func (r *Rockrobo) LocalGetStatus() (*MethodResultResponseGetStatus, error) {
+	// retrieve device ID
+	response, err := r.retrieveAppProxy(
+		&Method{
+			Method: MethodLocalGetStatus,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []MethodResultResponseGetStatus
+	err = json.Unmarshal(response.Result, &results)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) < 1 {
+		return nil, fmt.Errorf("no status found in response")
+	}
+
+	return &results[0], nil
+
+}
+
 // get the wifi status from local
 func (r *Rockrobo) LocalWifiConfigStatus() (int, error) {
 	// retrieve device ID
-	response, err := r.retrieve(
+	response, err := r.retrieveInternal(
 		&Method{
 			Method: MethodRequestWifiConfigStatus,
 			Params: json.RawMessage(fmt.Sprintf(`"%s"`, r.dir)),
