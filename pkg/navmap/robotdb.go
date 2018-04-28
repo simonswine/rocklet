@@ -30,8 +30,9 @@ type Cleaning struct {
 }
 
 const (
-	pixelWall   = 1
-	pixelInside = 255
+	pixelWall    = 1
+	pixelInside  = 255
+	pixelUnknown = 0
 )
 
 func (n *NavMap) ListCleanings() (cleanings []*v1alpha1.Cleaning, err error) {
@@ -188,6 +189,8 @@ func (n *NavMap) drawMap(r io.Reader) (*v1alpha1.Map, error) {
 				B: 187,
 				A: 255,
 			}
+		} else if b == pixelUnknown {
+			return color.RGBA{}
 		}
 		return color.RGBA{
 			R: b,
