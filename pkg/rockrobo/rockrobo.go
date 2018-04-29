@@ -357,6 +357,13 @@ func (r *Rockrobo) Run() error {
 			r.logger.Info().Msgf("%d cleanings found", len(cleanings))
 			for _, c := range cleanings {
 				r.cleaningCh <- c
+				// record metrics
+				if c.Status.Area != nil {
+					r.metrics.AreaCleanedTotal.WithLabelValues(r.flags.Kubernetes.NodeName).Add(float64(*c.Status.Area) / 1000000.0)
+				}
+				if d, err := time.ParseDuration(c.Status.Duration); err == nil {
+					r.metrics.TimeSpentCleaningTotal.WithLabelValues(r.flags.Kubernetes.NodeName).Add(d.Seconds())
+				}
 			}
 		}()
 
@@ -399,6 +406,7 @@ func (r *Rockrobo) Run() error {
 					ErrorCode:    status.ErrorCode,
 				}
 
+				// TODO: consumables
 				r.metrics.BatteryLevel.WithLabelValues(r.flags.Kubernetes.NodeName).Set(float64(status.Battery))
 
 				if r.deviceID != nil {

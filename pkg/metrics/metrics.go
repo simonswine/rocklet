@@ -16,8 +16,10 @@ const (
 type Metrics struct {
 	logger zerolog.Logger
 
-	registry     *prometheus.Registry
-	BatteryLevel *prometheus.GaugeVec
+	registry               *prometheus.Registry
+	BatteryLevel           *prometheus.GaugeVec
+	AreaCleanedTotal       *prometheus.CounterVec
+	TimeSpentCleaningTotal *prometheus.CounterVec
 }
 
 func New(logger zerolog.Logger) *Metrics {
@@ -30,6 +32,22 @@ func New(logger zerolog.Logger) *Metrics {
 				Namespace: Namespace,
 				Name:      "battery_level",
 				Help:      "Percentage of battery charged",
+			},
+			[]string{"node"},
+		),
+		AreaCleanedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Name:      "area_cleaned_total",
+				Help:      "Area in square meters that has been cleaned",
+			},
+			[]string{"node"},
+		),
+		TimeSpentCleaningTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Name:      "time_spent_cleaning_total",
+				Help:      "Total time spent cleaning",
 			},
 			[]string{"node"},
 		),
