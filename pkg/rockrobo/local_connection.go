@@ -31,8 +31,8 @@ const (
 	MethodLocalAppRCEnd   = "app_rc_end"
 	MethodLocalAppRCMove  = "app_rc_move"
 
-	MethodLocalAppStart  = "app_rc_start"
-	MethodLocalAppStop   = "app_rc_end"
+	MethodLocalAppStart  = "app_start"
+	MethodLocalAppStop   = "app_stop"
 	MethodLocalAppPause  = "app_pause"
 	MethodLocalAppSpot   = "app_spot"
 	MethodLocalAppCharge = "app_charge"
