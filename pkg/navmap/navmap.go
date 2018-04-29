@@ -48,7 +48,6 @@ type Map struct {
 	jpegBuf *bytes.Buffer
 	pngBuf  *bytes.Buffer
 
-	charger       *v1alpha1.Position
 	kubernetesMap *v1alpha1.Map
 }
 
@@ -119,11 +118,7 @@ func NewMap(path string, mTime time.Time) (*Map, error) {
 				cimg.Set(x, y, colorWall)
 				updateMinMax(x, y)
 			} else if cR, cG, cB, cA := c4.RGBA(); cR == r && cG == g && cB == b && cA == a {
-				// charger
-				m.charger = &v1alpha1.Position{
-					X: float32(x),
-					Y: float32(y),
-				}
+				// not to sure but this is a special point in the map, doesn't seem too be the charger
 				updateMinMax(x, y)
 			} else {
 				updateMinMax(x, y)
@@ -143,9 +138,9 @@ func NewMap(path string, mTime time.Time) (*Map, error) {
 
 	m.kubernetesMap = &v1alpha1.Map{
 		Left:   uint32(minX),
-		Top:    uint32(bounds.Max.Y - maxY),
-		Width:  uint32(m.image.Bounds().Max.X),
-		Height: uint32(m.image.Bounds().Max.Y),
+		Top:    uint32(minY),
+		Width:  uint32(maxX - minX),
+		Height: uint32(maxY - minY),
 		Data:   buffer.Bytes(),
 	}
 
@@ -392,15 +387,23 @@ func (n *NavMap) LatestPositionsMap() ([]v1alpha1.Position, *v1alpha1.Map, *v1al
 		return pos, nil, nil, fmt.Errorf("no kubernetes map found")
 	}
 
+	var charger *v1alpha1.Position
+
 	// convert coordinates for this image
 	for _, p := range n.positions {
+		if charger == nil {
+			charger = &v1alpha1.Position{
+				X: p.X - float32(latestMap.kubernetesMap.Left),
+				Y: p.Y - float32(latestMap.kubernetesMap.Top),
+			}
+		}
 		pos = append(pos, v1alpha1.Position{
 			X: p.X - float32(latestMap.kubernetesMap.Left),
 			Y: p.Y - float32(latestMap.kubernetesMap.Top),
 		})
 	}
 
-	return pos, latestMap.kubernetesMap, latestMap.charger, nil
+	return pos, latestMap.kubernetesMap, charger, nil
 }
 
 func (n *NavMap) WatchCleaning() (chan *v1alpha1.Cleaning, error) {
@@ -466,12 +469,11 @@ func (n *NavMap) watchSlamLog() {
 		n.logger.Fatal().Err(err).Msg("error watching slam log")
 	}
 	for line := range t.Lines {
-		// TODO: needs to clear positions at some point
 		l := n.parseSlamLine(line.Text)
 		if l.Command == "estimate" {
 			n.positionsAppend(v1alpha1.Position{
 				X: float32(l.X*20) + 512,
-				Y: float32(l.Y*20) + 512,
+				Y: 1024 - (float32(l.Y*20) + 512),
 			})
 		}
 		if l.Command == "reset" {
