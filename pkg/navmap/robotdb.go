@@ -68,9 +68,9 @@ func (n *NavMap) ListCleanings() (cleanings []*v1alpha1.Cleaning, err error) {
 				NodeName: n.flags.Kubernetes.NodeName,
 			},
 			Status: v1alpha1.CleaningStatus{
-				BeginTime:    &metav1.Time{time.Unix(begin, 0)},
-				EndTime:      &metav1.Time{time.Unix(end, 0)},
-				DayBeginTime: &metav1.Time{time.Unix(daybegin, 0)},
+				BeginTime:    &metav1.Time{Time: time.Unix(begin, 0)},
+				EndTime:      &metav1.Time{Time: time.Unix(end, 0)},
+				DayBeginTime: &metav1.Time{Time: time.Unix(daybegin, 0)},
 				Code:         &code,
 				ErrorCode:    &errcode,
 				Area:         &area,
@@ -283,7 +283,7 @@ func (n *NavMap) ConvertMap(r io.Reader, cleaning *v1alpha1.Cleaning) error {
 	}
 
 	if cleaning.Status.Map == nil {
-		fmt.Errorf("no map found")
+		return fmt.Errorf("no map found")
 	}
 
 	if path != nil {

@@ -9,13 +9,15 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/hpcloud/tail"
 	"github.com/lmittmann/ppm"
 	"github.com/rs/zerolog"
 
@@ -31,6 +33,10 @@ type NavMap struct {
 
 	latestMap     *Map
 	latestMapLock sync.Mutex
+
+	// these are full map pixel positions, full is 1024x1024
+	positions     []v1alpha1.Position
+	positionsLock sync.Mutex
 }
 
 type Map struct {
@@ -62,20 +68,28 @@ func NewMap(path string, mTime time.Time) (*Map, error) {
 
 }
 
-func (m *Map) handlePNG(w http.ResponseWriter, r *http.Request) {
-
+func (m *Map) PNG() ([]byte, error) {
 	if m.pngBuf == nil {
 		buffer := new(bytes.Buffer)
 		if err := png.Encode(buffer, m.image); err != nil {
-			http.Error(w, fmt.Sprintf("unable to encode image to png: %s", err), http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		m.pngBuf = buffer
 	}
+	return m.pngBuf.Bytes(), nil
+}
+
+func (m *Map) handlePNG(w http.ResponseWriter, r *http.Request) {
+
+	data, err := m.PNG()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unable to encode image to png: %s", err), http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Content-Length", strconv.Itoa(len(m.pngBuf.Bytes())))
-	w.Write(m.pngBuf.Bytes())
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Write(data)
 }
 
 func (m *Map) handleJPEG(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +126,6 @@ func (n *NavMap) Logger() *zerolog.Logger {
 func (n *NavMap) SetupHandler(serveMux *http.ServeMux) {
 	serveMux.HandleFunc("/navmap/jpeg", n.handleJPEG)
 	serveMux.HandleFunc("/navmap/png", n.handlePNG)
-	serveMux.HandleFunc("/navmap/upload", n.handleMapUpload)
 }
 
 func (n *NavMap) loopHTTPServer() {
@@ -129,6 +142,9 @@ func (n *NavMap) loopHTTPServer() {
 
 func (n *NavMap) LoopMaps(stopCh chan struct{}) {
 	c := time.Tick(200 * time.Millisecond)
+
+	// start slam log watcher
+	go n.watchSlamLog()
 
 	lookup := func() {
 		err := n.lookupMaps()
@@ -245,14 +261,188 @@ func ConvertMapToJPEG(input io.Reader, output io.Writer) error {
 	return nil
 }
 
+func (n *NavMap) Positions() []v1alpha1.Position {
+	n.positionsLock.Lock()
+	defer n.positionsLock.Unlock()
+	return n.positions
+}
+
+func (n *NavMap) positionsEmpty() {
+	n.positionsLock.Lock()
+	defer n.positionsLock.Unlock()
+	n.positions = []v1alpha1.Position{}
+}
+
+func (n *NavMap) positionsAppend(pos v1alpha1.Position) {
+	n.positionsLock.Lock()
+	defer n.positionsLock.Unlock()
+
+	// skip entry if vacuum is stationary
+	if len(n.positions) > 0 {
+		lastPos := n.positions[len(n.positions)-1]
+		if reflect.DeepEqual(lastPos, pos) {
+			return
+		}
+	}
+
+	// append position
+	n.positions = append(
+		n.positions,
+		pos,
+	)
+}
+
+func (n *NavMap) LatestPositionsMap() ([]v1alpha1.Position, *v1alpha1.Map, error) {
+	var pos []v1alpha1.Position
+	var m v1alpha1.Map
+
+	n.latestMapLock.Lock()
+	latestMap := n.latestMap
+	n.latestMapLock.Unlock()
+
+	if latestMap == nil {
+		return pos, nil, fmt.Errorf("no image found")
+	}
+
+	pngData, err := latestMap.PNG()
+	if err != nil {
+		return pos, nil, fmt.Errorf("no image found")
+	}
+
+	i := latestMap.image
+	s := i.Bounds().Size()
+	m.Width = uint32(s.X)
+	m.Height = uint32(s.Y)
+	m.Top = 0
+	m.Left = 0
+	m.Data = pngData
+
+	return n.Positions(), &m, nil
+}
+
 func (n *NavMap) WatchCleaning() (chan *v1alpha1.Cleaning, error) {
 	return nil, fmt.Errorf("unimplemented")
 }
 
-func (n *NavMap) handleMapUpload(w http.ResponseWriter, r *http.Request) {
-	rd, err := httputil.DumpRequest(r, true)
-	if err == nil {
-		n.logger.Info().Str("request", string(rd)).Msg("go away - no upload here")
+type slamLine struct {
+	Command   string
+	X         float64
+	Y         float64
+	Angle     float64
+	Int       int
+	Timestamp float64
+}
+
+type tailLogger struct {
+	zerolog.Logger
+}
+
+func (t tailLogger) Fatal(v ...interface{}) {
+	t.Logger.Fatal().Msg(fmt.Sprint(v...))
+}
+
+func (t tailLogger) Fatalf(fmt string, v ...interface{}) {
+	t.Logger.Fatal().Msgf(fmt, v...)
+}
+
+func (t tailLogger) Fatalln(v ...interface{}) {
+	t.Logger.Fatal().Msg(fmt.Sprint(v...))
+}
+
+func (t tailLogger) Print(v ...interface{}) {
+	t.Logger.Info().Msg(fmt.Sprint(v...))
+}
+
+func (t tailLogger) Printf(fmt string, v ...interface{}) {
+	t.Logger.Info().Msgf(fmt, v...)
+}
+
+func (t tailLogger) Println(v ...interface{}) {
+	t.Logger.Info().Msg(fmt.Sprint(v...))
+}
+func (t tailLogger) Panic(v ...interface{}) {
+	t.Logger.Fatal().Msg(fmt.Sprint(v...))
+}
+
+func (t tailLogger) Panicf(fmt string, v ...interface{}) {
+	t.Logger.Fatal().Msgf(fmt, v...)
+}
+
+func (t tailLogger) Panicln(v ...interface{}) {
+	t.Logger.Fatal().Msg(fmt.Sprint(v...))
+}
+
+func (n *NavMap) watchSlamLog() {
+	filePath := filepath.Join(n.flags.RuntimeDirectory, "SLAM_fprintf.log")
+	t, err := tail.TailFile(filePath, tail.Config{
+		Follow: true,
+		Logger: tailLogger{n.logger.With().Str("app", "tail").Logger()},
+		ReOpen: true,
+	})
+	if err != nil {
+		n.logger.Fatal().Err(err).Msg("error watching slam log")
 	}
-	http.Error(w, "not found", 404)
+	for line := range t.Lines {
+		// TODO: needs to clear positions at some point
+		l := n.parseSlamLine(line.Text)
+		if l.Command == "estimate" {
+			n.positionsAppend(v1alpha1.Position{
+				X: float32(l.X*20) + 512,
+				Y: float32(l.Y*20) + 512,
+			})
+		}
+		if l.Command == "reset" {
+			n.positionsEmpty()
+		}
+	}
+}
+
+func (n *NavMap) parseSlamLine(in string) *slamLine {
+	content := strings.TrimRight(in, "\n")
+	parts := strings.Split(content, " ")
+	if len(parts) < 2 {
+		return nil
+	}
+
+	l := &slamLine{}
+
+	if timestamp, err := strconv.ParseFloat(parts[0], 64); err != nil {
+		n.logger.Warn().Err(err).Msgf("error parsing float: %s", err)
+	} else {
+		l.Timestamp = timestamp
+	}
+
+	l.Command = parts[1]
+
+	if len(parts) >= 5 && (l.Command == "estimate" || l.Command == "set_pose") {
+		if x, err := strconv.ParseFloat(parts[2], 64); err != nil {
+			n.logger.Warn().Err(err).Msgf("error parsing float: %s", err)
+			return nil
+		} else {
+			l.X = x
+		}
+		if y, err := strconv.ParseFloat(parts[3], 64); err != nil {
+			n.logger.Warn().Err(err).Msgf("error parsing float: %s", err)
+			return nil
+		} else {
+			l.Y = y
+		}
+		if angle, err := strconv.ParseFloat(parts[4], 64); err != nil {
+			n.logger.Warn().Err(err).Msgf("error parsing float: %s", err)
+			return nil
+		} else {
+			l.Angle = angle
+		}
+	}
+
+	if len(parts) >= 3 && (l.Command == "load") {
+		if i, err := strconv.ParseInt(parts[2], 10, 64); err != nil {
+			n.logger.Warn().Err(err).Msgf("error parsing float: %s", err)
+			return nil
+		} else {
+			l.Int = int(i)
+		}
+	}
+
+	return l
 }

@@ -336,6 +336,11 @@ func (in *VacuumStatus) DeepCopyInto(out *VacuumStatus) {
 			**out = **in
 		}
 	}
+	if in.Path != nil {
+		in, out := &in.Path, &out.Path
+		*out = make([]Position, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

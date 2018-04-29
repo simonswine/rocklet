@@ -78,12 +78,12 @@ func TestConvertMap(t *testing.T) {
 	}
 
 	cleaning := &v1alpha1.Cleaning{}
-	err = n.convertMap(r, cleaning)
+	err = n.ConvertMap(r, cleaning)
 	if err != nil {
 		t.Error("unexpected error", err)
 	}
 
-	if exp, act := "c529919af8f8c1e26955367dbfceabb95a1d1f204f0cc04165f357f9d8bbe4da", fmt.Sprintf("%x", sha256.Sum256(cleaning.Status.Map.Data)); exp != act {
+	if exp, act := "01704f306f66210222738b4f77427f33b26a83be001667b14403fa4b9ea74838", fmt.Sprintf("%x", sha256.Sum256(cleaning.Status.Map.Data)); exp != act {
 		t.Errorf("unexpected result exp=%v act=%v", exp, act)
 	}
 

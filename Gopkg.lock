@@ -99,6 +99,19 @@
   revision = "bf9dde6d0d2c004a008c27aaee91170c786f6db8"
 
 [[projects]]
+  branch = "ljk/fix-fsnotify"
+  name = "github.com/hpcloud/tail"
+  packages = [
+    ".",
+    "ratelimiter",
+    "util",
+    "watch",
+    "winfile"
+  ]
+  revision = "000912af8de2d2b9d184786b4cf4c3542b7884e5"
+  source = "https://github.com/vsco/tail.git"
+
+[[projects]]
   name = "github.com/imdario/mergo"
   packages = ["."]
   revision = "9d5f1277e9a8ed20c3684bda8fde67c05628518c"
@@ -199,7 +212,7 @@
     "internal/bitbucket.org/ww/goautoneg",
     "model"
   ]
-  revision = "e5b036cc37a466a0af27d604d1ee500211d16d6a"
+  revision = "d811d2e9bf898806ecfb6ef6296774b13ffc314c"
 
 [[projects]]
   branch = "master"
@@ -238,7 +251,7 @@
   branch = "master"
   name = "golang.org/x/crypto"
   packages = ["ssh/terminal"]
-  revision = "b0697eccbea9adec5b7ba8008f4c33d98d733388"
+  revision = "b49d69b5da943f7ef3c9cf91c8777c1f78a0cc3c"
 
 [[projects]]
   branch = "master"
@@ -261,7 +274,7 @@
     "unix",
     "windows"
   ]
-  revision = "79b0c6888797020a994db17c8510466c72fe75d9"
+  revision = "cbbc999da32df943dac6cd71eb3ee39e1d7838b9"
 
 [[projects]]
   name = "golang.org/x/text"
@@ -298,13 +311,25 @@
     "imports",
     "internal/fastwalk"
   ]
-  revision = "c1def519f03ddf76f16b3e444ee1095d73afa01b"
+  revision = "8e070db38e5c55da6a85c81878ab769bf5667848"
+
+[[projects]]
+  name = "gopkg.in/fsnotify/fsnotify.v1"
+  packages = ["."]
+  revision = "c2828203cd70a50dcccfb2761f8b1f8ceef9a8e9"
+  version = "v1.4.7"
 
 [[projects]]
   name = "gopkg.in/inf.v0"
   packages = ["."]
   revision = "d2d2541c53f18d2a059457998ce2876cc8e67cbf"
   version = "v0.9.1"
+
+[[projects]]
+  branch = "v1"
+  name = "gopkg.in/tomb.v1"
+  packages = ["."]
+  revision = "dd632973f1e7218eb1089048e0798ec9ae7dceb8"
 
 [[projects]]
   name = "gopkg.in/yaml.v2"
@@ -409,7 +434,7 @@
     "pkg/server/httplog",
     "pkg/util/wsstream"
   ]
-  revision = "a2264066a63d215bbdc705c2390eb8691af4c6fe"
+  revision = "8c2267e167c1461fc7d38eb778306a9f98989053"
 
 [[projects]]
   name = "k8s.io/client-go"
@@ -525,7 +550,7 @@
   branch = "master"
   name = "k8s.io/kube-openapi"
   packages = ["pkg/util/proto"]
-  revision = "1e45fb05b06309c0d807d0930e1a81fe0a1cd4b8"
+  revision = "3a0c53868c9444e4224c3dd5dc2caa9b5107ff7b"
 
 [[projects]]
   name = "k8s.io/kubernetes"
@@ -533,8 +558,8 @@
     "pkg/apis/core",
     "pkg/kubelet/server/remotecommand"
   ]
-  revision = "d4ab47518836c750f9949b9e0d387f20fb92260b"
-  version = "v1.10.1"
+  revision = "81753b10df112992bf51bbc2c2f85208aad78335"
+  version = "v1.10.2"
 
 [[projects]]
   branch = "master"
@@ -545,6 +570,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "94395947b56489c29f26755142cb796c4132e86bd2d288a9bb0790a6396f3fbb"
+  inputs-digest = "0b48f6532b01403c260872e7d707ed847fa828b163273b416cfeda4bb483dbf6"
   solver-name = "gps-cdcl"
   solver-version = 1

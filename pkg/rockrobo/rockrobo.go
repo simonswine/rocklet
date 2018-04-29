@@ -1,10 +1,8 @@
 package rockrobo
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -367,10 +365,19 @@ func (r *Rockrobo) Run() error {
 			// wait for device ready
 			<-r.localDeviceReadyCh
 
-			ticker := time.NewTicker(2 * time.Second).C
+			tickerStatus := time.NewTicker(2 * time.Second).C
+			tickerInternalInfo := time.NewTicker(60 * time.Second).C
 
-			for {
-				<-ticker
+			var internalInfo *MethodParamsResponseInternalInfo
+			getInternalInfo := func() {
+				var err error
+				internalInfo, err = r.GetInternalInfo()
+				if err != nil {
+					r.logger.Warn().Err(err).Msg("cannot get internal info")
+				}
+			}
+
+			updateStatus := func() {
 				status, err := r.LocalGetStatus()
 				if err != nil {
 					r.logger.Warn().Err(err).Msg("error getting status from device")
@@ -399,29 +406,40 @@ func (r *Rockrobo) Run() error {
 					vacuumStatus.DeviceID = r.deviceID.DeviceID
 				}
 
-				internalInfo, err := r.GetInternalInfo()
-				if err != nil {
-					r.logger.Warn().Err(err).Msg("cannot get internal info")
-				} else {
+				if internalInfo != nil {
 					vacuumStatus.WifiSSID = internalInfo.AccessPoint.SSID
 					vacuumStatus.WifiRSSI = internalInfo.AccessPoint.RSSI
 				}
 
-				// Retrieve map if file available
-				dat, err := ioutil.ReadFile(r.flags.AppProxyMapPath)
-				if err == nil {
-					var c v1alpha1.Cleaning
-					err := r.navMap.ConvertMap(bytes.NewReader(dat), &c)
+				// get map if available
+				if status.MapPresent != 0 {
+					p, m, err := r.navMap.LatestPositionsMap()
 					if err != nil {
-						r.logger.Warn().Err(err).Msg("error converting map")
+						r.logger.Warn().Err(err).Msg("error getting local map")
+					} else {
+						vacuumStatus.Map = m
+						vacuumStatus.Path = p
 					}
-					vacuumStatus.Map = c.Status.Map
-				} else if !os.IsNotExist(err) {
-					r.logger.Warn().Err(err).Msg("error reading map")
 				}
 
-				r.logger.Info().Interface("status", vacuumStatus).Msg("got status from device")
+				if err := r.kubernetes.UpdateVaccumStatus(vacuumStatus); err != nil {
+					r.logger.Warn().Interface("status", vacuumStatus).Err(err).Msg("failed updating vacuum status")
+				}
 
+			}
+
+			getInternalInfo()
+			updateStatus()
+
+			for {
+				select {
+				case <-r.stopCh:
+					return
+				case <-tickerInternalInfo:
+					getInternalInfo()
+				case <-tickerStatus:
+					updateStatus()
+				}
 			}
 		}()
 	}
@@ -439,53 +457,6 @@ func (r *Rockrobo) Run() error {
 	go func() {
 		defer r.waitGroup.Done()
 		r.navMap.LoopMaps(r.stopCh)
-	}()
-
-	// uploads handler
-	r.waitGroup.Add(1)
-	go func() {
-		defer r.waitGroup.Done()
-		dataCh := make(chan *Method)
-
-		r.incomingQueuesLock.Lock()
-		r.incomingQueues["_sync.gen_presigned_url"] = dataCh
-		r.incomingQueuesLock.Unlock()
-
-		result := struct {
-			URL     string `json:"url"`
-			ObjName string `json:"obj_name"`
-			Method  string `json:"method"`
-			Time    int64  `json:"time"`
-			Ok      bool   `json:"ok"`
-			Pwd     string `json:"pwd"`
-		}{}
-
-		for {
-			select {
-			case m := <-dataCh:
-
-				result.Method = "PUT"
-				result.Time = time.Now().UnixNano()
-				result.ObjName = r.flags.Kubernetes.NodeName
-				result.Pwd = "secret"
-				result.Ok = true
-				result.URL = "http://127.0.0.1:54320/navmap/upload"
-
-				resultData, err := json.Marshal(&result)
-				if err != nil {
-					r.logger.Warn().Err(err).Msg("error responding to upload")
-				}
-
-				r.outgoingQueueAppProxy <- &Method{
-					ID:     m.ID,
-					Result: json.RawMessage(resultData),
-				}
-
-			case <-r.stopCh:
-				return
-			}
-		}
-
 	}()
 
 	// run local tcp connection handler

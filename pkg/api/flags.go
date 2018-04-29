@@ -5,7 +5,6 @@ type Flags struct {
 	DataDirectory    string
 	RuntimeDirectory string
 	RobotDatabase    string
-	AppProxyMapPath  string
 
 	Cloud struct {
 		Enabled bool

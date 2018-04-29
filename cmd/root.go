@@ -44,7 +44,6 @@ func init() {
 	// rockrobo flags
 	rootCmd.PersistentFlags().StringVarP(&flags.DataDirectory, "data-directory", "d", "/mnt/data/miio", "MIIO data directory")
 	rootCmd.PersistentFlags().StringVarP(&flags.RuntimeDirectory, "runtime-directory", "r", "/run/shm", "Runtime directory")
-	rootCmd.PersistentFlags().StringVar(&flags.AppProxyMapPath, "app-proxy-map-path", "/mnt/data/rockrobo/appproxy.map", "Directory where latest appproxy map is stored")
 	rootCmd.PersistentFlags().StringVar(&flags.RobotDatabase, "robot-database", "/mnt/data/rockrobo/robot.db", "Path to robot's sqlite3 database")
 	rootCmd.PersistentFlags().BoolVar(&flags.Cloud.Enabled, "cloud", false, "Enable xiamio cloud forwarding")
 

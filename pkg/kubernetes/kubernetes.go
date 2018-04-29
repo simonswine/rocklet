@@ -44,6 +44,8 @@ type Kubernetes struct {
 	cleaningCh chan *v1alpha1.Cleaning
 
 	fakePodsCompleted bool
+
+	vacuumObj *v1alpha1.Vacuum
 }
 
 func (k *Kubernetes) Logger() *zerolog.Logger {
@@ -99,6 +101,7 @@ func (k *Kubernetes) Run() error {
 		k.cleaningCh = make(chan *v1alpha1.Cleaning)
 	}
 
+mainLoop:
 	for {
 		select {
 		case c := <-k.cleaningCh:
@@ -112,7 +115,7 @@ func (k *Kubernetes) Run() error {
 			k.logger.Debug().Msg("sync node status")
 			k.syncNodeStatus()
 		case <-k.stopCh:
-			break
+			break mainLoop
 		}
 	}
 
