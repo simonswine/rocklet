@@ -35,6 +35,22 @@ const (
 	pixelUnknown = 0
 )
 
+var (
+	colorWall = color.RGBA{
+		R: 105,
+		G: 207,
+		B: 254,
+		A: 255,
+	}
+	colorInside = color.RGBA{
+		R: 33,
+		G: 115,
+		B: 187,
+		A: 255,
+	}
+	colorUnknown = color.RGBA{}
+)
+
 func (n *NavMap) ListCleanings() (cleanings []*v1alpha1.Cleaning, err error) {
 	db, err := sql.Open("sqlite3", n.flags.RobotDatabase)
 	if err != nil {
@@ -176,21 +192,11 @@ func (n *NavMap) drawMap(r io.Reader) (*v1alpha1.Map, error) {
 
 	colorConvert := func(b byte) color.RGBA {
 		if b == pixelWall {
-			return color.RGBA{
-				R: 105,
-				G: 207,
-				B: 254,
-				A: 255,
-			}
+			return colorWall
 		} else if b == pixelInside {
-			return color.RGBA{
-				R: 33,
-				G: 115,
-				B: 187,
-				A: 255,
-			}
+			return colorInside
 		} else if b == pixelUnknown {
-			return color.RGBA{}
+			return colorUnknown
 		}
 		return color.RGBA{
 			R: b,

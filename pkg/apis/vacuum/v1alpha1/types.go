@@ -25,6 +25,7 @@ const (
 	VacuumStateWaiting       = "Waiting"
 	VacuumStateCleaning      = "Cleaning"
 	VacuumStateReturningHome = "ReturningHome"
+	VacuumStateRemoteControl = "RemoteControl"
 	VacuumStateCharging      = "Charging"
 	VacuumStateChargingError = "ChargingError"
 	VacuumStatePause         = "Pause"
@@ -44,6 +45,7 @@ var VacuumStateHash = map[int]string{
 	3:   VacuumStateWaiting,
 	5:   VacuumStateCleaning,
 	6:   VacuumStateReturningHome,
+	7:   VacuumStateRemoteControl,
 	8:   VacuumStateCharging,
 	9:   VacuumStateChargingError,
 	10:  VacuumStatePause,
@@ -78,6 +80,7 @@ type VacuumStatus struct {
 	State        string     `json:"state"`
 	Map          *Map       `json:"map,omitempty"`
 	Position     *Position  `json:"position,omitempty"`
+	Charger      *Position  `json:"charger,omitempty"`
 	Duration     string     `json:"duration"`
 	Area         int        `json:"area"`
 	BatteryLevel int        `json:"batteryLevel"`

@@ -413,12 +413,15 @@ func (r *Rockrobo) Run() error {
 
 				// get map if available
 				if status.MapPresent != 0 {
-					p, m, err := r.navMap.LatestPositionsMap()
+					p, m, c, err := r.navMap.LatestPositionsMap()
 					if err != nil {
 						r.logger.Warn().Err(err).Msg("error getting local map")
 					} else {
 						vacuumStatus.Map = m
 						vacuumStatus.Path = p
+						if c != nil {
+							vacuumStatus.Charger = c
+						}
 					}
 				}
 

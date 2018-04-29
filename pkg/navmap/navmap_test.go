@@ -21,6 +21,24 @@ var exampleSLAMMap = `12.361 pause
 25619.296 estimate 0.008 0.049 1.162
 `
 
+func TestMap_New(t *testing.T) {
+	m, err := NewMap("navmap0.ppm", time.Now())
+
+	if err != nil {
+		t.Fatal("failed to create map: ", err)
+	}
+
+	data, err := m.PNG()
+	if err != nil {
+		t.Fatal("failed to create png: ", err)
+	}
+
+	err = ioutil.WriteFile("test1.png", data, 0644)
+	if err != nil {
+		t.Fatal("failed to create png: ", err)
+	}
+}
+
 func TestSlamMap(t *testing.T) {
 
 	tempDir, err := ioutil.TempDir("", "")

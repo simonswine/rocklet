@@ -53,7 +53,7 @@ func (k *Kubernetes) tryUpdateVaccumStatus(status *v1alpha1.VacuumStatus) error 
 	}
 
 	v.Status = newStatus
-	v, err = client.UpdateStatus(v)
+	v, err = client.Update(v)
 	if err != nil {
 		k.vacuumObj = nil
 		return err

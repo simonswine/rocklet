@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -46,6 +47,15 @@ type Map struct {
 
 	jpegBuf *bytes.Buffer
 	pngBuf  *bytes.Buffer
+
+	charger       *v1alpha1.Position
+	kubernetesMap *v1alpha1.Map
+}
+
+type imageChangeable interface {
+	image.Image
+	Set(x, y int, c color.Color)
+	SubImage(r image.Rectangle) image.Image
 }
 
 func NewMap(path string, mTime time.Time) (*Map, error) {
@@ -62,6 +72,81 @@ func NewMap(path string, mTime time.Time) (*Map, error) {
 	m.image, err = ppm.Decode(in)
 	if err != nil {
 		return nil, err
+	}
+
+	cimg, ok := m.image.(imageChangeable)
+	if !ok {
+		return nil, fmt.Errorf("unable to change image")
+	}
+
+	// record used area
+	bounds := cimg.Bounds()
+	minX := bounds.Max.X
+	maxX := bounds.Min.X
+	minY := bounds.Max.Y
+	maxY := bounds.Min.Y
+
+	updateMinMax := func(x int, y int) {
+		if minX > x {
+			minX = x
+		}
+		if minY > y {
+			minY = y
+		}
+		if maxX < x {
+			maxX = x
+		}
+		if maxY < y {
+			maxY = y
+		}
+	}
+
+	// recolorize image
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := cimg.At(x, y).RGBA()
+			c1 := color.RGBA{R: 125, G: 125, B: 125, A: 255}
+			c2 := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+			c3 := color.RGBA{R: 0, G: 0, B: 0, A: 255}
+			c4 := color.RGBA{R: 0xfa, G: 0xfa, B: 0xfa, A: 0xff}
+
+			if cR, cG, cB, cA := c1.RGBA(); cR == r && cG == g && cB == b && cA == a {
+				cimg.Set(x, y, colorUnknown)
+			} else if cR, cG, cB, cA := c2.RGBA(); cR == r && cG == g && cB == b && cA == a {
+				cimg.Set(x, y, colorInside)
+				updateMinMax(x, y)
+			} else if cR, cG, cB, cA := c3.RGBA(); cR == r && cG == g && cB == b && cA == a {
+				cimg.Set(x, y, colorWall)
+				updateMinMax(x, y)
+			} else if cR, cG, cB, cA := c4.RGBA(); cR == r && cG == g && cB == b && cA == a {
+				// charger
+				m.charger = &v1alpha1.Position{
+					X: float32(x),
+					Y: float32(y),
+				}
+				updateMinMax(x, y)
+			} else {
+				updateMinMax(x, y)
+			}
+		}
+	}
+
+	m.image = cimg.SubImage(image.Rectangle{
+		Min: image.Point{X: minX, Y: minY},
+		Max: image.Point{X: maxX, Y: maxY},
+	})
+
+	buffer := new(bytes.Buffer)
+	if err := png.Encode(buffer, m.image); err != nil {
+		return nil, err
+	}
+
+	m.kubernetesMap = &v1alpha1.Map{
+		Left:   uint32(minX),
+		Top:    uint32(bounds.Max.Y - maxY),
+		Width:  uint32(m.image.Bounds().Max.X),
+		Height: uint32(m.image.Bounds().Max.Y),
+		Data:   buffer.Bytes(),
 	}
 
 	return m, nil
@@ -292,32 +377,30 @@ func (n *NavMap) positionsAppend(pos v1alpha1.Position) {
 	)
 }
 
-func (n *NavMap) LatestPositionsMap() ([]v1alpha1.Position, *v1alpha1.Map, error) {
+func (n *NavMap) LatestPositionsMap() ([]v1alpha1.Position, *v1alpha1.Map, *v1alpha1.Position, error) {
 	var pos []v1alpha1.Position
-	var m v1alpha1.Map
 
 	n.latestMapLock.Lock()
 	latestMap := n.latestMap
 	n.latestMapLock.Unlock()
 
 	if latestMap == nil {
-		return pos, nil, fmt.Errorf("no image found")
+		return pos, nil, nil, fmt.Errorf("no image found")
 	}
 
-	pngData, err := latestMap.PNG()
-	if err != nil {
-		return pos, nil, fmt.Errorf("no image found")
+	if latestMap.kubernetesMap == nil {
+		return pos, nil, nil, fmt.Errorf("no kubernetes map found")
 	}
 
-	i := latestMap.image
-	s := i.Bounds().Size()
-	m.Width = uint32(s.X)
-	m.Height = uint32(s.Y)
-	m.Top = 0
-	m.Left = 0
-	m.Data = pngData
+	// convert coordinates for this image
+	for _, p := range n.positions {
+		pos = append(pos, v1alpha1.Position{
+			X: p.X - float32(latestMap.kubernetesMap.Left),
+			Y: p.Y - float32(latestMap.kubernetesMap.Top),
+		})
+	}
 
-	return n.Positions(), &m, nil
+	return pos, latestMap.kubernetesMap, latestMap.charger, nil
 }
 
 func (n *NavMap) WatchCleaning() (chan *v1alpha1.Cleaning, error) {
