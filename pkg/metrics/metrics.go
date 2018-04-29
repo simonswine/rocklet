@@ -54,6 +54,8 @@ func New(logger zerolog.Logger) *Metrics {
 	}
 
 	s.registry.MustRegister(s.BatteryLevel)
+	s.registry.MustRegister(s.AreaCleanedTotal)
+	s.registry.MustRegister(s.TimeSpentCleaningTotal)
 
 	return s
 }
