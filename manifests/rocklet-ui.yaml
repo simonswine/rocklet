@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rocklet-ui
+  labels:
+    app: rocklet-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rocklet-ui
+  template:
+    metadata:
+      labels:
+        app: rocklet-ui
+    spec:
+      serviceAccountName: rocklet-ui
+      containers:
+      - name: rocklet-ui
+        image: simonswine/rocklet-ui:0.1.2
+        ports:
+        - containerPort: 8812
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: rocklet-ui
+spec:
+  selector:
+    app: rocklet-ui
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8812
+  type: NodePort
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rocklet-ui
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: rocklet-ui
+rules:
+- apiGroups: ["vacuum.swine.de"]
+  resources: ["vacuums", "cleanings"]
+  verbs: ["get", "watch", "list"]
+--- 
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: rocklet-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rocklet-ui
+subjects:
+- kind: ServiceAccount
+  name: rocklet-ui
+  namespace: default
