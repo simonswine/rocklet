@@ -5,6 +5,7 @@ import (
 	goruntime "runtime"
 	"time"
 
+	"github.com/matishsiao/goInfo"
 	"k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -348,6 +349,10 @@ func (k *Kubernetes) setNodeAdress(node *v1.Node) {
 
 func (k *Kubernetes) setNodeStatusVersionInfo(node *v1.Node) {
 	node.Status.NodeInfo.ContainerRuntimeVersion = fmt.Sprintf("%s://%s", "rockrobo", "v1")
+	node.Status.NodeInfo.KubeletVersion = k.flags.Version.String()
+	info := goInfo.GetInfo()
+	node.Status.NodeInfo.KernelVersion = info.Kernel
+	node.Status.NodeInfo.OperatingSystem = info.OS
 }
 
 // recordNodeStatusEvent records an event of the given type with the given
