@@ -4,6 +4,8 @@ IMAGE_NAME := rocklet-build-image
 
 HACK_DIR ?= hack
 
+HOST ?= rockrobo
+
 # A list of all types.go files in pkg/apis
 TYPES_FILES := $(shell find pkg/apis -name types.go)
 
@@ -17,7 +19,7 @@ build_arm:
 
 # Sync binary to rockrobo
 rockrobo_sync:
-	rsync --partial --progress rocklet_arm root@rockrobo:/mnt/data/rocklet
+	rsync --partial --progress rocklet_arm root@$(HOST):/mnt/data/rocklet
 
 # Code generation
 #################
