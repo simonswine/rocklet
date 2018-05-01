@@ -148,6 +148,12 @@
   version = "v1.1.1"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/matishsiao/goInfo"
+  packages = ["."]
+  revision = "617e6440957ee5591c8912e8b7e2f03a86298722"
+
+[[projects]]
   name = "github.com/mattn/go-runewidth"
   packages = ["."]
   revision = "9e777a8366cce605130a531d2cd6363d07ad7317"
@@ -497,7 +503,8 @@
     "util/flowcontrol",
     "util/homedir",
     "util/integer",
-    "util/retry"
+    "util/retry",
+    "util/workqueue"
   ]
   revision = "989be4278f353e42f26c416c53757d16fcff77db"
   version = "kubernetes-1.10.1"
@@ -570,6 +577,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "0b48f6532b01403c260872e7d707ed847fa828b163273b416cfeda4bb483dbf6"
+  inputs-digest = "615378a9705f4a4bfd283522975827e4a2a9533bd0e1696dba7baea09ad4ed7a"
   solver-name = "gps-cdcl"
   solver-version = 1

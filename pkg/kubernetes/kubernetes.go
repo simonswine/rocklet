@@ -95,6 +95,9 @@ func (k *Kubernetes) Run() error {
 		Host:      k.nodeName,
 	})
 
+	// start pod controller
+	go k.runPodController()
+
 	nodeStatusTicker := time.NewTicker(15 * time.Second)
 
 	if k.cleaningCh == nil {
