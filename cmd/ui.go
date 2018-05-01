@@ -106,10 +106,10 @@ var uiCmd = &cobra.Command{
 		defer termui.Close()
 
 		speedValue := &steeringAxis{
-			min:   -3.0,
-			max:   3.0,
+			min:   -0.29,
+			max:   0.29,
 			start: 0.0,
-			step:  0.06,
+			step:  0.05,
 		}
 		speed := termui.NewGauge()
 		speed.Percent = 50
@@ -122,10 +122,10 @@ var uiCmd = &cobra.Command{
 		speed.BorderLabelFg = termui.ColorBlack
 
 		directionValue := &steeringAxis{
-			min:   -0.2,
-			max:   0.2,
+			min:   -3.141,
+			max:   3.141,
 			start: 0.0,
-			step:  0.004,
+			step:  0.1,
 		}
 		direction := termui.NewGauge()
 		direction.Percent = 50
@@ -194,11 +194,11 @@ var uiCmd = &cobra.Command{
 		}
 
 		termui.Handle("/sys/kbd/<left>", func(e termui.Event) {
-			directionValue.Sub()
+			directionValue.Add()
 		})
 
 		termui.Handle("/sys/kbd/<right>", func(e termui.Event) {
-			directionValue.Add()
+			directionValue.Sub()
 		})
 
 		termui.Handle("/sys/kbd/<down>", func(e termui.Event) {
