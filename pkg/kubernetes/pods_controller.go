@@ -65,11 +65,13 @@ func (k *Kubernetes) runPodController() {
 
 func (k *Kubernetes) NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller, resource string, kubeClient kubernetes.Interface, rockrobo Rockrobo) *Controller {
 	return &Controller{
-		informer: informer,
-		indexer:  indexer,
-		queue:    queue,
-		logger:   k.logger,
-		resource: resource,
+		informer:   informer,
+		indexer:    indexer,
+		queue:      queue,
+		logger:     k.logger,
+		resource:   resource,
+		rockrobo:   rockrobo,
+		kubeClient: kubeClient,
 	}
 }
 
