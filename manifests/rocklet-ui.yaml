@@ -17,7 +17,7 @@ spec:
       serviceAccountName: rocklet-ui
       containers:
       - name: rocklet-ui
-        image: simonswine/rocklet-ui:0.1.3
+        image: simonswine/rocklet-ui:0.1.5
         ports:
         - containerPort: 8812
 ---
