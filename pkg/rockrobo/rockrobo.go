@@ -109,7 +109,7 @@ func New(flags *api.Flags) *Rockrobo {
 	if r.flags.Kubernetes.Enabled {
 		r.cleaningCh = make(chan *v1alpha1.Cleaning, 16)
 		r.vacuumStatusCh = make(chan v1alpha1.VacuumStatus)
-		r.kubernetes = kubernetes.NewInternal(flags, r.stopCh, r.vacuumStatusCh, r.cleaningCh)
+		r.kubernetes = kubernetes.NewInternal(flags, r.stopCh, r.vacuumStatusCh, r.cleaningCh, r)
 	}
 
 	// generate new token
@@ -274,6 +274,21 @@ func (r *Rockrobo) retrieve(requestObj *Method, methodResponse string, outgoing 
 	r.Logger().Debug().Interface("resp", resp).Msg("data received")
 
 	return resp, nil
+}
+
+func (r *Rockrobo) AppCommand(command string, args json.RawMessage) error {
+
+	m := &Method{
+		Method: command,
+		Params: args,
+	}
+
+	if _, err := r.retrieveAppProxy(m); err != nil {
+		return err
+	}
+	// TODO: check status in command return m
+
+	return nil
 }
 
 func (r *Rockrobo) retrieveAppProxy(requestObj *Method) (*Method, error) {

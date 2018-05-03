@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -10,17 +11,20 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	api "k8s.io/kubernetes/pkg/apis/core"
 )
 
 type Controller struct {
-	indexer  cache.Indexer
-	queue    workqueue.RateLimitingInterface
-	informer cache.Controller
-	logger   zerolog.Logger
-	resource string
+	indexer    cache.Indexer
+	queue      workqueue.RateLimitingInterface
+	informer   cache.Controller
+	logger     zerolog.Logger
+	resource   string
+	rockrobo   Rockrobo
+	kubeClient kubernetes.Interface
 }
 
 func (k *Kubernetes) runPodController() {
@@ -53,13 +57,13 @@ func (k *Kubernetes) runPodController() {
 			}
 		},
 	}, cache.Indexers{})
-	controller := k.NewController(queue, indexer, informer, "pods")
+	controller := k.NewController(queue, indexer, informer, "pods", k.kubeClient, k.rockrobo)
 
 	controller.Run(1, k.stopCh)
 
 }
 
-func (k *Kubernetes) NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller, resource string) *Controller {
+func (k *Kubernetes) NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller, resource string, kubeClient kubernetes.Interface, rockrobo Rockrobo) *Controller {
 	return &Controller{
 		informer: informer,
 		indexer:  indexer,
@@ -108,27 +112,56 @@ func (c *Controller) sendNotify(key string) error {
 		stopCh := make(chan struct{})
 		done := make(chan bool)
 		go func() {
-			// TODO: implement actions
-			time.Sleep(time.Second * 5)
+			for pos, _ := range pod.Spec.Containers {
+				var args json.RawMessage
+				if len(pod.Spec.Containers[pos].Args) < 1 {
+					args = json.RawMessage([]byte{})
+				} else {
+					args = json.RawMessage(pod.Spec.Containers[pos].Args[0])
+				}
+				err := c.rockrobo.AppCommand(
+					pod.Spec.Containers[pos].Image,
+					args,
+				)
+				if err != nil {
+					done <- false
+					return
+				}
+			}
 			done <- true
 		}()
 
 		select {
-		case <-time.Tick(2 * time.Second):
+		case <-time.Tick(5 * time.Second):
 			close(stopCh)
 			return fmt.Errorf("action on pod %s timed out", key)
 		case result, ok := <-done:
 			if ok && result {
-				// TODO update status
+				// TODO retry update status
+				if err := c.updatePodStatus(pod, v1.PodSucceeded); err != nil {
+					c.logger.Warn().Err(err).Msg("failed to update pod status")
+				}
 				return nil
+			} else {
+				if err := c.updatePodStatus(pod, v1.PodFailed); err != nil {
+					c.logger.Warn().Err(err).Msg("failed to update pod status")
+				}
+
+				return fmt.Errorf("failed to run command pod: %s/%s", pod.Namespace, pod.Name)
 			}
-			//
 		}
 	}
 
 	c.logger.Info().Msgf("received update for pod %s/%s\n", pod.GetNamespace(), pod.GetName())
 	//return fmt.Errorf("implement me: %s", "sendNotify")
 	return nil
+}
+
+func (c *Controller) updatePodStatus(pod *v1.Pod, s v1.PodPhase) error {
+	copy := pod.DeepCopy()
+	copy.Status.Phase = s
+	_, err := c.kubeClient.CoreV1().Pods(pod.Namespace).UpdateStatus(copy)
+	return err
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.

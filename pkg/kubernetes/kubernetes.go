@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"encoding/json"
 	"os"
 	"time"
 
@@ -46,6 +47,13 @@ type Kubernetes struct {
 	fakePodsCompleted bool
 
 	vacuumObj *v1alpha1.Vacuum
+
+	// rockrobo interface
+	rockrobo Rockrobo
+}
+
+type Rockrobo interface {
+	AppCommand(command string, args json.RawMessage) error
 }
 
 func (k *Kubernetes) Logger() *zerolog.Logger {
@@ -139,10 +147,11 @@ func New(flags *api.Flags) *Kubernetes {
 	return k
 }
 
-func NewInternal(flags *api.Flags, stopCh chan struct{}, statusCh chan v1alpha1.VacuumStatus, cleaningCh chan *v1alpha1.Cleaning) *Kubernetes {
+func NewInternal(flags *api.Flags, stopCh chan struct{}, statusCh chan v1alpha1.VacuumStatus, cleaningCh chan *v1alpha1.Cleaning, rockrobo Rockrobo) *Kubernetes {
 	k := New(flags)
 	k.stopCh = stopCh
 	k.vacuumStatusCh = statusCh
 	k.cleaningCh = cleaningCh
+	k.rockrobo = rockrobo
 	return k
 }
