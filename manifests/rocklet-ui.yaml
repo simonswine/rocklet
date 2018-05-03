@@ -17,7 +17,7 @@ spec:
       serviceAccountName: rocklet-ui
       containers:
       - name: rocklet-ui
-        image: simonswine/rocklet-ui:0.1.2
+        image: simonswine/rocklet-ui:0.1.3
         ports:
         - containerPort: 8812
 ---
@@ -47,7 +47,10 @@ rules:
 - apiGroups: ["vacuum.swine.de"]
   resources: ["vacuums", "cleanings"]
   verbs: ["get", "watch", "list"]
---- 
+- apiGroups: ["batch", "extensions"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding
 metadata:
