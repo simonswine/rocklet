@@ -1,0 +1,22 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: demo-reminder
+spec:
+  schedule: "25 12 * * *"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: spot-clean
+        spec:
+          nodeName: "rockrobo-brendan"
+          restartPolicy: "Never"
+          tolerations:
+            - effect: NoExecute
+              key: mi.com/vacuum
+              operator: Exists
+          containers:
+          - name: rocklet
+            image: app_start
